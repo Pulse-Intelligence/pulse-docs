@@ -5,8 +5,21 @@ import "fumadocs-ui/style.css";
 import "./global.css";
 
 export const metadata: Metadata = {
-  title: "Pulse Documentation",
-  description: "Documentation for the Pulse platform",
+  title: {
+    default: "Pulse Documentation",
+    template: "%s | Pulse Docs",
+  },
+  description:
+    "Documentation for the Pulse platform — build LLM-powered applications with visual workflows, RAG pipelines, and plugin-based model management.",
+  icons: {
+    icon: "/favicon.svg",
+  },
+  openGraph: {
+    title: "Pulse Documentation",
+    description: "Build LLM-powered applications with Pulse",
+    siteName: "Pulse Docs",
+    type: "website",
+  },
 };
 
 export default function Layout({ children }: { children: ReactNode }) {
