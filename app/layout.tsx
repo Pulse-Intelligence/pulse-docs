@@ -1,4 +1,5 @@
 import { RootProvider } from "fumadocs-ui/provider/next";
+import { Analytics } from "@vercel/analytics/next";
 import type { ReactNode } from "react";
 import type { Metadata } from "next";
 import "fumadocs-ui/style.css";
@@ -29,6 +30,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         style={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}
       >
         <RootProvider>{children}</RootProvider>
+        <Analytics />
       </body>
     </html>
   );
