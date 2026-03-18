@@ -101,12 +101,11 @@ with a pipeline.
 
 ### Command Types
 
-```
-GraphEngineCommand (base)
-  |
-  +-- AbortCommand      (stop execution immediately)
-  +-- PauseCommand       (pause execution, remember resume point)
-  +-- UpdateVariablesCommand  (update variable pool mid-execution)
+```mermaid
+graph TD
+    Base["GraphEngineCommand (base)"] --> Abort["AbortCommand\n(stop execution immediately)"]
+    Base --> Pause["PauseCommand\n(pause execution,\nremember resume point)"]
+    Base --> UpdateVars["UpdateVariablesCommand\n(update variable pool mid-execution)"]
 ```
 
 ### Processing Loop
@@ -114,15 +113,14 @@ GraphEngineCommand (base)
 The `CommandProcessor` polls the channel during the engine's dispatch
 loop:
 
-```
-Dispatcher main loop:
-  1. Process events from EventQueue
-  2. Poll CommandChannel for pending commands
-  3. For each command:
-     a. Look up registered handler
-     b. Execute handler (sets flags on GraphExecution)
-  4. Check if execution should stop/pause
-  5. Repeat
+```mermaid
+graph TD
+    Step1["1. Process events from EventQueue"] --> Step2["2. Poll CommandChannel\nfor pending commands"]
+    Step2 --> Step3["3. For each command:\na. Look up registered handler\nb. Execute handler\n(sets flags on GraphExecution)"]
+    Step3 --> Step4["4. Check if execution\nshould stop/pause"]
+    Step4 --> Step5{"Continue?"}
+    Step5 -->|Yes| Step1
+    Step5 -->|No| Stop["Stop/Pause execution"]
 ```
 
 Command handlers are registered via a strategy pattern:

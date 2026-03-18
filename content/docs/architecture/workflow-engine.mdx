@@ -9,43 +9,24 @@ execution, streaming responses, error recovery, and external control commands.
 
 ## Architecture Overview
 
-```
-+------------------------------------------------------------------+
-|                         GraphEngine                               |
-|  api/core/workflow/graph_engine/graph_engine.py                  |
-|                                                                  |
-|  +------------------+    +------------------+    +-------------+ |
-|  |   WorkerPool     |    |   ReadyQueue     |    | EventQueue  | |
-|  |  (thread pool)   |--->|  (thread-safe)   |    | (stdlib)    | |
-|  +--------+---------+    +------------------+    +------+------+ |
-|           |                                             |        |
-|           | execute node                    push events |        |
-|           v                                             v        |
-|  +------------------+    +------------------+    +-------------+ |
-|  |  Worker threads  |    |   Dispatcher     |--->| EventHandler| |
-|  |  pull from queue  |    |  (event loop)   |    | (routing)   | |
-|  +------------------+    +--------+---------+    +------+------+ |
-|                                   |                     |        |
-|                          +--------v---------+    +------v------+ |
-|                          | ExecutionCoord.  |    |EdgeProcessor| |
-|                          | (lifecycle mgmt) |    |(graph trav.)| |
-|                          +------------------+    +------+------+ |
-|                                                         |        |
-|                          +------------------+    +------v------+ |
-|                          | CommandProcessor |    |SkipPropagat.| |
-|                          | (external cmds)  |    |(skip logic) | |
-|                          +------------------+    +-------------+ |
-|                                                                  |
-|  +------------------+    +------------------+    +-------------+ |
-|  | ResponseStream   |    | GraphState       |    | ErrorHandler| |
-|  | Coordinator      |    | Manager          |    | (strategies)| |
-|  +------------------+    +------------------+    +-------------+ |
-|                                                                  |
-|  +------------------+    +------------------+                    |
-|  | EventManager     |    | Layers (plugins) |                    |
-|  | (collect+emit)   |    | [Debug,Limits,.] |                    |
-|  +------------------+    +------------------+                    |
-+------------------------------------------------------------------+
+```mermaid
+graph TD
+    subgraph GraphEngine["GraphEngine\napi/core/workflow/graph_engine/graph_engine.py"]
+        WorkerPool["WorkerPool\n(thread pool)"] --> ReadyQueue["ReadyQueue\n(thread-safe)"]
+        WorkerPool -->|execute node| WorkerThreads["Worker Threads\npull from queue"]
+        WorkerThreads -->|push events| EventQueue["EventQueue\n(stdlib)"]
+        EventQueue --> Dispatcher["Dispatcher\n(event loop)"]
+        Dispatcher --> EventHandler["EventHandler\n(routing)"]
+        Dispatcher --> ExecutionCoord["ExecutionCoordinator\n(lifecycle mgmt)"]
+        EventHandler --> EdgeProcessor["EdgeProcessor\n(graph traversal)"]
+        EdgeProcessor --> SkipPropagator["SkipPropagator\n(skip logic)"]
+        CommandProcessor["CommandProcessor\n(external cmds)"]
+        ResponseStream["ResponseStream\nCoordinator"]
+        GraphState["GraphState\nManager"]
+        ErrorHandler["ErrorHandler\n(strategies)"]
+        EventManager["EventManager\n(collect + emit)"]
+        Layers["Layers (plugins)\nDebug, Limits, ..."]
+    end
 ```
 
 ## GraphEngine Constructor
@@ -91,35 +72,21 @@ Key subsystems initialized in the constructor:
 
 ### Startup Sequence
 
-```
-GraphEngine.run()
-    |
-    +-> _initialize_layers()
-    |       Each layer gets on_graph_start()
-    |
-    +-> yield GraphRunStartedEvent
-    |
-    +-> _start_execution()
-    |       |
-    |       +-> WorkerPool.start()
-    |       |       Create N worker threads (daemon=True)
-    |       |
-    |       +-> Register response nodes with coordinator
-    |       |
-    |       +-> StateManager.enqueue_node(root_node.id)
-    |       |       Put root node into ReadyQueue
-    |       |
-    |       +-> Dispatcher.start()
-    |               Start event dispatch loop thread
-    |
-    +-> yield from EventManager.emit_events()
-    |       Yield events to caller as they arrive
-    |
-    +-> Handle completion (success/failure/partial/paused/aborted)
-    |
-    +-> _stop_execution()
-            Stop dispatcher and worker pool
-            Notify layers with on_graph_end()
+```mermaid
+graph TD
+    Run["GraphEngine.run()"] --> InitLayers["_initialize_layers()\nEach layer gets on_graph_start()"]
+    InitLayers --> YieldStart["yield GraphRunStartedEvent"]
+    YieldStart --> StartExec["_start_execution()"]
+    StartExec --> PoolStart["WorkerPool.start()\nCreate N worker threads (daemon=True)"]
+    StartExec --> RegisterResp["Register response nodes\nwith coordinator"]
+    StartExec --> EnqueueRoot["StateManager.enqueue_node(root_node.id)\nPut root node into ReadyQueue"]
+    StartExec --> DispatcherStart["Dispatcher.start()\nStart event dispatch loop thread"]
+    PoolStart --> EmitEvents
+    RegisterResp --> EmitEvents
+    EnqueueRoot --> EmitEvents
+    DispatcherStart --> EmitEvents["yield from EventManager.emit_events()\nYield events to caller as they arrive"]
+    EmitEvents --> HandleCompletion["Handle completion\n(success / failure / partial / paused / aborted)"]
+    HandleCompletion --> StopExec["_stop_execution()\nStop dispatcher and worker pool\nNotify layers with on_graph_end()"]
 ```
 
 ### Worker Execution Loop
@@ -146,26 +113,23 @@ and push the resulting events into the `EventQueue` for the `Dispatcher`.
 
 ### Event Flow
 
-```
-Worker Thread           EventQueue          Dispatcher          EventHandler
-    |                      |                    |                    |
-    |-- node.run() ------->|                    |                    |
-    |   yields events      |                    |                    |
-    |-- put(event) ------->|                    |                    |
-    |                      |-- get(event) ----->|                    |
-    |                      |                    |-- route event ---->|
-    |                      |                    |                    |
-    |                      |                    |    On success:     |
-    |                      |                    |    EdgeProcessor   |
-    |                      |                    |      -> enqueue    |
-    |                      |                    |         next nodes |
-    |                      |                    |                    |
-    |                      |                    |    On failure:     |
-    |                      |                    |    ErrorHandler    |
-    |                      |                    |      -> retry?     |
-    |                      |                    |      -> fail-branch|
-    |                      |                    |      -> default?   |
-    |                      |                    |      -> abort      |
+```mermaid
+sequenceDiagram
+    participant Worker as Worker Thread
+    participant EQ as EventQueue
+    participant Dispatcher
+    participant EH as EventHandler
+
+    Worker->>Worker: node.run() yields events
+    Worker->>EQ: put(event)
+    EQ->>Dispatcher: get(event)
+    Dispatcher->>EH: route event
+
+    alt On success
+        EH->>EH: EdgeProcessor -> enqueue next nodes
+    else On failure
+        EH->>EH: ErrorHandler -> retry? / fail-branch / default? / abort
+    end
 ```
 
 ## Node Type Taxonomy
@@ -217,41 +181,33 @@ class NodeExecutionType(StrEnum):
 
 ### Node Classification Matrix
 
-```
-+-------------------+--------------------+--------------------------------------+
-| Execution Type    | Node Types         | Behavior                             |
-+-------------------+--------------------+--------------------------------------+
-| ROOT              | START              | Workflow entry point                 |
-|                   | DATASOURCE         | RAG pipeline entry                   |
-|                   | TRIGGER_WEBHOOK    | Webhook-triggered entry              |
-|                   | TRIGGER_SCHEDULE   | Cron-triggered entry                 |
-|                   | TRIGGER_PLUGIN     | Plugin-triggered entry               |
-+-------------------+--------------------+--------------------------------------+
-| EXECUTABLE        | LLM                | Call language model                   |
-|                   | CODE               | Execute Python/JS in sandbox         |
-|                   | HTTP_REQUEST       | Make HTTP calls (via SSRF proxy)     |
-|                   | TOOL               | Invoke plugin tools                  |
-|                   | TEMPLATE_TRANSFORM | Jinja2 template rendering            |
-|                   | PARAMETER_EXTRACTOR| Extract structured data from text    |
-|                   | KNOWLEDGE_RETRIEVAL| Query vector store                   |
-|                   | KNOWLEDGE_INDEX    | Index documents                      |
-|                   | DOCUMENT_EXTRACTOR | Parse file content                   |
-|                   | LIST_OPERATOR      | List manipulation                    |
-|                   | VARIABLE_AGGREGATOR| Merge variables                      |
-|                   | VARIABLE_ASSIGNER  | Assign/update variables              |
-|                   | AGENT              | Run agent strategy                   |
-|                   | HUMAN_INPUT        | Pause for human input                |
-+-------------------+--------------------+--------------------------------------+
-| RESPONSE          | ANSWER             | Stream text to user                  |
-|                   | END                | Terminal node with outputs            |
-+-------------------+--------------------+--------------------------------------+
-| BRANCH            | IF_ELSE            | Conditional branching                |
-|                   | QUESTION_CLASSIFIER| LLM-based routing                    |
-+-------------------+--------------------+--------------------------------------+
-| CONTAINER         | ITERATION          | Iterate over list items              |
-|                   | LOOP               | Loop with condition                  |
-+-------------------+--------------------+--------------------------------------+
-```
+| Execution Type | Node Types | Behavior |
+| -------------- | ---------- | -------- |
+| ROOT | START | Workflow entry point |
+| | DATASOURCE | RAG pipeline entry |
+| | TRIGGER_WEBHOOK | Webhook-triggered entry |
+| | TRIGGER_SCHEDULE | Cron-triggered entry |
+| | TRIGGER_PLUGIN | Plugin-triggered entry |
+| EXECUTABLE | LLM | Call language model |
+| | CODE | Execute Python/JS in sandbox |
+| | HTTP_REQUEST | Make HTTP calls (via SSRF proxy) |
+| | TOOL | Invoke plugin tools |
+| | TEMPLATE_TRANSFORM | Jinja2 template rendering |
+| | PARAMETER_EXTRACTOR | Extract structured data from text |
+| | KNOWLEDGE_RETRIEVAL | Query vector store |
+| | KNOWLEDGE_INDEX | Index documents |
+| | DOCUMENT_EXTRACTOR | Parse file content |
+| | LIST_OPERATOR | List manipulation |
+| | VARIABLE_AGGREGATOR | Merge variables |
+| | VARIABLE_ASSIGNER | Assign/update variables |
+| | AGENT | Run agent strategy |
+| | HUMAN_INPUT | Pause for human input |
+| RESPONSE | ANSWER | Stream text to user |
+| | END | Terminal node with outputs |
+| BRANCH | IF_ELSE | Conditional branching |
+| | QUESTION_CLASSIFIER | LLM-based routing |
+| CONTAINER | ITERATION | Iterate over list items |
+| | LOOP | Loop with condition |
 
 ## Node Base Class and Registry
 
@@ -292,35 +248,15 @@ The registry automatically maps `NodeType.CODE -> {"1": CodeNode, "latest": Code
 
 ### Node Lifecycle
 
-```
-                      +---------------------+
-                      |   node.run()        |
-                      +----------+----------+
-                                 |
-                    +------------v-----------+
-                    | yield NodeRunStarted   |
-                    +------------+-----------+
-                                 |
-                    +------------v-----------+
-                    |     node._run()        |
-                    |  (subclass override)   |
-                    +--+--------+--------+--+
-                       |        |        |
-                  NodeRunResult | Generator
-                       |        |    of events
-                       v        v        |
-              +--------+--+  +-+--------+--------+
-              | Convert   |  | For each event:   |
-              | to event  |  |   dispatch(event) |
-              +-----------+  +---+--------+------+
-                                 |        |
-                    StreamChunk  |  StreamCompleted
-                    AgentLog     |  PauseRequested
-                    IterEvents   |  LoopEvents
-                                 v
-                         NodeRunSucceeded
-                              or
-                         NodeRunFailed
+```mermaid
+graph TD
+    NodeRun["node.run()"] --> YieldStarted["yield NodeRunStarted"]
+    YieldStarted --> NodeRunImpl["node._run()\n(subclass override)"]
+    NodeRunImpl -->|NodeRunResult| ConvertEvent["Convert to event"]
+    NodeRunImpl -->|Generator of events| DispatchEach["For each event:\ndispatch(event)"]
+    DispatchEach -->|StreamChunk, AgentLog, IterEvents| DispatchEach
+    DispatchEach -->|StreamCompleted, PauseRequested, LoopEvents| FinalEvent
+    ConvertEvent --> FinalEvent["NodeRunSucceeded\nor\nNodeRunFailed"]
 ```
 
 ## VariablePool
@@ -349,25 +285,13 @@ variable_pool.get(("node_abc", "result"))  # -> Variable("hello world")
 
 ### Variable Namespaces
 
-```
-+-------------------------------------+----------------------------------+
-| Namespace Node ID                   | Content                          |
-+-------------------------------------+----------------------------------+
-| "sys"                               | System variables (query, files,  |
-|                                     | conversation_id, user_id, ...)   |
-+-------------------------------------+----------------------------------+
-| "env"                               | Environment variables            |
-|                                     | (per-workflow config)            |
-+-------------------------------------+----------------------------------+
-| "conversation"                      | Conversation variables           |
-|                                     | (persist across turns)           |
-+-------------------------------------+----------------------------------+
-| "rag_pipeline"                      | RAG pipeline variables           |
-+-------------------------------------+----------------------------------+
-| "<actual_node_id>"                  | Node outputs (set after          |
-|                                     | successful execution)            |
-+-------------------------------------+----------------------------------+
-```
+| Namespace Node ID | Content |
+| ----------------- | ------- |
+| `"sys"` | System variables (query, files, conversation_id, user_id, ...) |
+| `"env"` | Environment variables (per-workflow config) |
+| `"conversation"` | Conversation variables (persist across turns) |
+| `"rag_pipeline"` | RAG pipeline variables |
+| `"<actual_node_id>"` | Node outputs (set after successful execution) |
 
 ### System Variables
 
@@ -396,26 +320,14 @@ class SystemVariableKey(StrEnum):
 The `ErrorHandler` (`api/core/workflow/graph_engine/error_handler.py`)
 implements a cascading error strategy:
 
-```
-Node Failure
-    |
-    v
-+-- Has retry config AND retries remaining?
-|       YES -> sleep(retry_interval) -> NodeRunRetryEvent -> re-execute
-|       NO  -> continue to error strategy
-|
-+-- Node error_strategy setting?
-        |
-        +-- None (default) -> ABORT
-        |       Stop entire graph execution
-        |
-        +-- FAIL_BRANCH -> NodeRunExceptionEvent
-        |       Route through "fail-branch" edge
-        |       Outputs: {error_message, error_type}
-        |
-        +-- DEFAULT_VALUE -> NodeRunExceptionEvent
-                Use node's default_value_dict as outputs
-                Continue normal execution
+```mermaid
+graph TD
+    NodeFailure["Node Failure"] --> RetryCheck{"Has retry config\nAND retries remaining?"}
+    RetryCheck -->|YES| Retry["sleep(retry_interval)\nNodeRunRetryEvent\nre-execute"]
+    RetryCheck -->|NO| ErrorStrategy{"Node error_strategy?"}
+    ErrorStrategy -->|"None (default)"| Abort["ABORT\nStop entire graph execution"]
+    ErrorStrategy -->|FAIL_BRANCH| FailBranch["NodeRunExceptionEvent\nRoute through fail-branch edge\nOutputs: error_message, error_type"]
+    ErrorStrategy -->|DEFAULT_VALUE| DefaultValue["NodeRunExceptionEvent\nUse node's default_value_dict\nContinue normal execution"]
 ```
 
 ```python
@@ -428,32 +340,25 @@ class ErrorStrategy(StrEnum):
 
 The `WorkflowExecutionStatus` enum defines the complete state machine:
 
-```
-                +------------------->---------------------------->------------------+
-                |                                                                   |
-                |                      +------------------------<-----------------+ |
-                ^                      |                                          | |
-                |                      v                                          ^ |
-          +-----------+       +------------------+                          +---------+
-          | Scheduled |------>|     Running      |------------------------->| Paused  |
-          +-----------+       +------------------+                          +---------+
-                |               |      |      |  |                               |
-                |               |      |      |  v                               v
-               (@)              |      |      |  +----->+----------+      +----------+
-                                |      |      |         |  Stopped |<-----| Stopped  |
-                                |      |      |         +----------+      +----------+
-                                |      |      v               |
-                                |      | +-----------+        v
-                                |      | | Succeeded |------->|
-                                |      | +-----------+        |
-                                |      v                      v
-                                | +--------+                  |
-                                | | Failed |-------->---------+
-                                | +--------+                  |
-                                v                             v
-                      +--------------------+                  |
-                      | Partial Succeeded  |-------->---------+---> (*)
-                      +--------------------+
+```mermaid
+stateDiagram-v2
+    [*] --> Scheduled
+    Scheduled --> Running
+    Scheduled --> Stopped
+
+    Running --> Paused
+    Running --> Stopped
+    Running --> Succeeded
+    Running --> Failed
+    Running --> PartialSucceeded : Partial Succeeded
+
+    Paused --> Running
+    Paused --> Stopped
+
+    Succeeded --> [*]
+    Failed --> [*]
+    PartialSucceeded --> [*]
+    Stopped --> [*]
 ```
 
 ## Layer System
@@ -558,21 +463,12 @@ self._command_processor.register_handler(
 When a branch node (IF_ELSE, QUESTION_CLASSIFIER) takes one path, the
 `SkipPropagator` marks all nodes on untaken branches as `SKIPPED`.
 
-```
-                    +--------+
-                    | IF_ELSE|
-                    +---+----+
-                       / \
-              true   /     \   false
-                   /         \
-              +---v---+   +---v---+
-              | LLM_A |   | LLM_B |  <-- SKIPPED if condition is true
-              +---+---+   +---+---+
-                  |             |
-                  v             v
-              +---+-------------+---+
-              |     ANSWER          |  <-- Only runs when all
-              +---------------------+      predecessors resolve
+```mermaid
+graph TD
+    IfElse["IF_ELSE"] -->|true| LLM_A["LLM_A"]
+    IfElse -->|false| LLM_B["LLM_B\n(SKIPPED if condition is true)"]
+    LLM_A --> Answer["ANSWER\nOnly runs when all\npredecessors resolve"]
+    LLM_B --> Answer
 ```
 
 The propagation is recursive: if a skipped node has downstream nodes that

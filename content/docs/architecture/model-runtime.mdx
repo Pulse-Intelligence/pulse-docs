@@ -9,35 +9,24 @@ validation, streaming support, and load balancing.
 
 ## Three-Layer Architecture
 
-```
-+------------------------------------------------------------------+
-|                     Application Layer                             |
-|  ModelManager / ProviderManager                                  |
-|  api/core/model_manager.py, api/core/provider_manager.py        |
-+------------------------------------------------------------------+
-                              |
-                              v
-+------------------------------------------------------------------+
-|                     Provider Layer                                |
-|  ProviderConfiguration / ProviderModelBundle                     |
-|  api/core/entities/provider_configuration.py                     |
-|  Credential management, model settings, load balancing           |
-+------------------------------------------------------------------+
-                              |
-                              v
-+------------------------------------------------------------------+
-|                     Model Type Layer                              |
-|  Base classes for each model type                                |
-|  api/core/model_runtime/model_providers/__base/                  |
-|  LargeLanguageModel, TextEmbeddingModel, RerankModel, etc.      |
-+------------------------------------------------------------------+
-                              |
-                              v
-+------------------------------------------------------------------+
-|                     Plugin Daemon                                 |
-|  Go-based daemon (dify-plugin-daemon)                            |
-|  All provider implementations run as plugins                     |
-+------------------------------------------------------------------+
+```mermaid
+graph TD
+    subgraph AppLayer["Application Layer"]
+        AppDesc["ModelManager / ProviderManager\napi/core/model_manager.py\napi/core/provider_manager.py"]
+    end
+    subgraph ProviderLayer["Provider Layer"]
+        ProvDesc["ProviderConfiguration / ProviderModelBundle\napi/core/entities/provider_configuration.py\nCredential management, model settings, load balancing"]
+    end
+    subgraph ModelTypeLayer["Model Type Layer"]
+        ModelDesc["Base classes for each model type\napi/core/model_runtime/model_providers/__base/\nLargeLanguageModel, TextEmbeddingModel, RerankModel, etc."]
+    end
+    subgraph PluginDaemon["Plugin Daemon"]
+        DaemonDesc["Go-based daemon (dify-plugin-daemon)\nAll provider implementations run as plugins"]
+    end
+
+    AppLayer --> ProviderLayer
+    ProviderLayer --> ModelTypeLayer
+    ModelTypeLayer --> PluginDaemon
 ```
 
 ## Six Model Types
@@ -88,31 +77,16 @@ class ModelInstance:
 
 ### Invocation Flow
 
-```
-Application Code
-    |
-    v
-ModelInstance.invoke_llm(prompt_messages, model_parameters, ...)
-    |
-    +-- Load balancing? -----> LBModelManager.invoke(...)
-    |       YES                    Round-robin across credential sets
-    |       NO
-    |
-    +-- model_type_instance.invoke(
-    |       model=self.model,
-    |       credentials=self.credentials,
-    |       prompt_messages=prompt_messages,
-    |       ...
-    |   )
-    |
-    v
-LargeLanguageModel.invoke()
-    |
-    v
-Plugin Daemon (HTTP)
-    |
-    v
-Actual Provider API (OpenAI, Anthropic, etc.)
+```mermaid
+graph TD
+    AppCode["Application Code"] --> InvokeLLM["ModelInstance.invoke_llm(\nprompt_messages, model_parameters, ...)"]
+    InvokeLLM --> LBCheck{"Load balancing?"}
+    LBCheck -->|YES| LBManager["LBModelManager.invoke(...)\nRound-robin across credential sets"]
+    LBCheck -->|NO| TypeInvoke["model_type_instance.invoke(\nmodel, credentials,\nprompt_messages, ...)"]
+    LBManager --> LLMInvoke["LargeLanguageModel.invoke()"]
+    TypeInvoke --> LLMInvoke
+    LLMInvoke --> PluginDaemon["Plugin Daemon (HTTP)"]
+    PluginDaemon --> ProviderAPI["Actual Provider API\n(OpenAI, Anthropic, etc.)"]
 ```
 
 ## ProviderManager
@@ -163,18 +137,13 @@ ProviderConfigurations (per tenant)
 All model providers are loaded through the plugin system. The
 `ModelProviderFactory` communicates with the Plugin Daemon:
 
-```
-ModelProviderFactory
-    |
-    +-- PluginModelClient (api/core/plugin/impl/model.py)
-            |
-            +-- BasePluginClient._request()
-                    |
-                    +-- HTTP to Plugin Daemon (port 5002)
-                            |
-                            +-- Plugin Daemon routes to provider plugin
-                                    |
-                                    +-- Provider plugin calls API
+```mermaid
+graph TD
+    Factory["ModelProviderFactory"] --> PluginClient["PluginModelClient\n(api/core/plugin/impl/model.py)"]
+    PluginClient --> BaseClient["BasePluginClient._request()"]
+    BaseClient --> HTTP["HTTP to Plugin Daemon\n(port 5002)"]
+    HTTP --> DaemonRoute["Plugin Daemon routes\nto provider plugin"]
+    DaemonRoute --> ProviderCall["Provider plugin calls API"]
 ```
 
 ### Model Provider Factory
@@ -189,29 +158,12 @@ class ModelProviderFactory:
 
 Credentials are validated at multiple levels:
 
-```
-User submits credentials
-    |
-    v
-+------------------+
-| Schema Validation|  CredentialFormSchema defines required fields
-+------------------+
-    |
-    v
-+------------------+
-| Provider Plugin  |  Plugin validates against actual API
-| Validation       |  (e.g., test API call to OpenAI)
-+------------------+
-    |
-    v
-+------------------+
-| Encryption       |  Per-tenant RSA encryption before storage
-+------------------+
-    |
-    v
-+------------------+
-| Database Storage |  ProviderCredential / ProviderModelCredential
-+------------------+
+```mermaid
+graph TD
+    Submit["User submits credentials"] --> SchemaValidation["Schema Validation\nCredentialFormSchema defines required fields"]
+    SchemaValidation --> PluginValidation["Provider Plugin Validation\nPlugin validates against actual API\n(e.g., test API call to OpenAI)"]
+    PluginValidation --> Encryption["Encryption\nPer-tenant RSA encryption before storage"]
+    Encryption --> DBStorage["Database Storage\nProviderCredential / ProviderModelCredential"]
 ```
 
 ### Credential Form Schema

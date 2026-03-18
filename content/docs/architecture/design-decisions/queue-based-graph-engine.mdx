@@ -34,16 +34,13 @@ topological order, one at a time, in a single thread.
 Replace the sequential executor with a **queue-based graph engine** that
 uses a ready queue and a dynamic thread pool:
 
-```
-+-------------+     +-----------+     +--------+     +-------------+
-|  ReadyQueue |---->|  Worker   |---->| Node   |---->| EventQueue  |
-| (nodes that |     |  Pool     |     | .run() |     | (completion |
-|  can run)   |     | (threads) |     |        |     |  events)    |
-+------+------+     +-----------+     +--------+     +------+------+
-       ^                                                     |
-       |                                                     |
-       +------------- EdgeProcessor / StateManager ----------+
-                    (determines next ready nodes)
+```mermaid
+graph LR
+    ReadyQueue["ReadyQueue\n(nodes that can run)"] --> WorkerPool["Worker Pool\n(threads)"]
+    WorkerPool --> NodeRun["Node.run()"]
+    NodeRun --> EventQueue["EventQueue\n(completion events)"]
+    EventQueue --> EdgeProcessor["EdgeProcessor /\nStateManager\n(determines next ready nodes)"]
+    EdgeProcessor --> ReadyQueue
 ```
 
 ### Key Components
@@ -67,17 +64,18 @@ uses a ready queue and a dynamic thread pool:
 
 ### Execution Flow
 
-```
-1. Seed ReadyQueue with root nodes (Start, Trigger)
-2. Workers pull nodes and execute them
-3. Completion events flow to EventQueue
-4. Dispatcher processes events:
-   a. Update node state to "completed"
-   b. EdgeProcessor finds successor nodes
-   c. StateManager checks if successors' dependencies are met
-   d. Enqueue ready successors to ReadyQueue
-5. Repeat until ReadyQueue is empty and all workers are idle
-6. Yield final GraphRunSucceeded/Failed/Paused event
+```mermaid
+graph TD
+    Step1["1. Seed ReadyQueue with\nroot nodes (Start, Trigger)"] --> Step2["2. Workers pull nodes\nand execute them"]
+    Step2 --> Step3["3. Completion events\nflow to EventQueue"]
+    Step3 --> Step4["4. Dispatcher processes events"]
+    Step4 --> Step4a["a. Update node state\nto completed"]
+    Step4 --> Step4b["b. EdgeProcessor finds\nsuccessor nodes"]
+    Step4 --> Step4c["c. StateManager checks if\nsuccessors' dependencies are met"]
+    Step4 --> Step4d["d. Enqueue ready successors\nto ReadyQueue"]
+    Step4d --> Step5{"5. ReadyQueue empty\nand all workers idle?"}
+    Step5 -->|No| Step2
+    Step5 -->|Yes| Step6["6. Yield final\nGraphRunSucceeded/Failed/Paused event"]
 ```
 
 ## Consequences

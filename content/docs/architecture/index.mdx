@@ -7,6 +7,45 @@ This directory contains deep-dive architecture documentation for the Pulse platf
 Pulse is an open-source LLM application platform designed for
 production deployment with enhanced workflow, RAG, and trigger capabilities.
 
+## Architecture Overview
+
+```mermaid
+graph TD
+    SystemOverview["System Overview"] --> WorkflowEngine["Workflow Engine"]
+    SystemOverview --> RAGPipeline["RAG Pipeline"]
+    SystemOverview --> ModelRuntime["Model Runtime"]
+    SystemOverview --> PluginSystem["Plugin System"]
+    SystemOverview --> TriggerSystem["Trigger System"]
+    SystemOverview --> MultiTenancy["Multi-Tenancy"]
+    SystemOverview --> AppModes["App Modes & Runners"]
+    SystemOverview --> AsyncCelery["Async & Celery"]
+
+    WorkflowEngine --> StorageData["Storage & Data Flow"]
+    WorkflowEngine --> Observability["Observability"]
+    WorkflowEngine --> PerfScaling["Performance & Scaling"]
+    WorkflowEngine --> SecurityModel["Security Model"]
+
+    RAGPipeline --> ModelRuntime
+    PluginSystem --> ModelRuntime
+    TriggerSystem --> WorkflowEngine
+    AppModes --> WorkflowEngine
+    AsyncCelery --> WorkflowEngine
+
+    click SystemOverview "/docs/architecture/system-overview" "System Overview"
+    click WorkflowEngine "/docs/architecture/workflow-engine" "Workflow Engine"
+    click RAGPipeline "/docs/architecture/rag-pipeline" "RAG Pipeline"
+    click ModelRuntime "/docs/architecture/model-runtime" "Model Runtime"
+    click PluginSystem "/docs/architecture/plugin-system" "Plugin System"
+    click TriggerSystem "/docs/architecture/trigger-system" "Trigger System"
+    click MultiTenancy "/docs/architecture/multi-tenancy" "Multi-Tenancy"
+    click AppModes "/docs/architecture/app-modes-and-runners" "App Modes and Runners"
+    click AsyncCelery "/docs/architecture/async-and-celery" "Async and Celery"
+    click StorageData "/docs/architecture/storage-and-data-flow" "Storage and Data Flow"
+    click Observability "/docs/architecture/observability" "Observability"
+    click PerfScaling "/docs/architecture/performance-and-scaling" "Performance and Scaling"
+    click SecurityModel "/docs/architecture/security-model" "Security Model"
+```
+
 ## Document Index
 
 | # | Document | Summary |
@@ -36,7 +75,7 @@ For engineers new to the codebase, we recommend:
 
 - **Code snippets** reference actual file paths relative to the repository root
   (e.g., `api/core/workflow/graph_engine/graph_engine.py`).
-- **ASCII diagrams** illustrate system topology, data flow, and state machines.
+- **Mermaid diagrams** illustrate system topology, data flow, and state machines.
 - **Class signatures** show the real constructor parameters from the source code.
 - Cross-references link to related architecture documents and ADRs in
   `docs/pulse/architecture/14-design-decisions/`.

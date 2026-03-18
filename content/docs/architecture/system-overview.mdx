@@ -8,42 +8,24 @@ description: "Senior Engineers"
 Pulse is a multi-tier LLM application platform with a clear separation between
 client-facing frontend, API backend, async workers, and infrastructure services.
 
-```
-                              +-----------+
-                              |  Browser  |
-                              |  (React)  |
-                              +-----+-----+
-                                    |
-                                    | HTTPS
-                                    v
-                         +--------------------+
-                         |   Next.js 15 SSR   |
-                         |   (web/ on :3000)   |
-                         +----+----------+----+
-                              |          |
-                     API calls|          | SSE streams
-                              v          v
-                   +---------------------------+
-                   |     Flask API Server      |
-                   |     (api/ on :5001)        |
-                   |                           |
-                   |  Blueprints  Controllers  |
-                   |  Services    Core Domains |
-                   +--+-----+-----+-----+-----+
-                      |     |     |     |
-           +----------+  +--+  +--+  +--+-----------+
-           |             |     |     |               |
-           v             v     v     v               v
-     +-----------+  +-------+ +---+ +--------+ +----------+
-     | PostgreSQL|  | Redis | |S3/| | Plugin | | Celery   |
-     |    16     |  |   7   | |FSt| | Daemon | | Workers  |
-     +-----------+  +-------+ +---+ +--------+ +----------+
-                                        |
-                                        v
-                                  +-----------+
-                                  |  Plugins  |
-                                  | (Python)  |
-                                  +-----------+
+```mermaid
+graph TD
+    Browser["Browser (React)"] -->|HTTPS| NextJS["Next.js 15 SSR\n(web/ on :3000)"]
+    NextJS -->|API calls| FlaskAPI["Flask API Server\n(api/ on :5001)\n\nBlueprints · Controllers\nServices · Core Domains"]
+    NextJS -->|SSE streams| FlaskAPI
+    FlaskAPI --> PostgreSQL["PostgreSQL 16"]
+    FlaskAPI --> Redis["Redis 7"]
+    FlaskAPI --> S3["S3 / FS"]
+    FlaskAPI --> PluginDaemon["Plugin Daemon"]
+    FlaskAPI --> CeleryWorkers["Celery Workers"]
+    PluginDaemon --> Plugins["Plugins (Python)"]
+
+    click FlaskAPI "/docs/architecture/system-overview" "System Overview"
+    click NextJS "/docs/architecture/system-overview" "System Overview"
+    click PluginDaemon "/docs/architecture/plugin-system" "Plugin System"
+    click CeleryWorkers "/docs/architecture/async-and-celery" "Async and Celery"
+    click PostgreSQL "/docs/architecture/storage-and-data-flow" "Storage and Data Flow"
+    click Redis "/docs/architecture/storage-and-data-flow" "Storage and Data Flow"
 ```
 
 ## Service Topology
@@ -70,26 +52,23 @@ client-facing frontend, API backend, async workers, and infrastructure services.
 
 ## Network Architecture
 
-```
-+================================================================+
-|                       pulse-network (bridge)                    |
-|                                                                |
-|  +----------+  +-------+  +----------+  +--------+  +-------+ |
-|  | Flask API|  | Redis |  | Weaviate |  | Plugin |  | SSRF  | |
-|  |  :5001   |  | :6379 |  |  :8080   |  | Daemon |  | Proxy | |
-|  +----------+  +-------+  +----------+  | :5002  |  | :3128 | |
-|                                          | :5003  |  +---+---+ |
-|                                          +--------+      |     |
-+================================================================+
-                                                           |
-                    +=================================+    |
-                    | ssrf_proxy_network (internal)   |    |
-                    |                                 |    |
-                    |  +----------+     +---------+   |    |
-                    |  | Sandbox  |<--->| SSRF    |<--+    |
-                    |  |  :8194   |     | Proxy   |        |
-                    |  +----------+     +---------+        |
-                    +=================================+
+```mermaid
+graph TD
+    subgraph PulseNetwork["pulse-network (bridge)"]
+        FlaskAPI_N["Flask API\n:5001"]
+        Redis_N["Redis\n:6379"]
+        Weaviate_N["Weaviate\n:8080"]
+        PluginDaemon_N["Plugin Daemon\n:5002 / :5003"]
+        SSRFProxy_N["SSRF Proxy\n:3128"]
+    end
+
+    subgraph SSRFNetwork["ssrf_proxy_network (internal)"]
+        Sandbox_N["Sandbox\n:8194"]
+        SSRFProxy_Int["SSRF Proxy"]
+    end
+
+    SSRFProxy_N --- SSRFProxy_Int
+    SSRFProxy_Int <--> Sandbox_N
 ```
 
 The network topology uses two Docker networks:
@@ -104,50 +83,66 @@ The network topology uses two Docker networks:
 
 ### Synchronous API Request
 
-```
-Browser                  Next.js              Flask API             PostgreSQL
-  |                        |                     |                      |
-  |-- GET /apps ---------->|                     |                      |
-  |                        |-- GET /api/apps --->|                      |
-  |                        |                     |-- SELECT * FROM ... >|
-  |                        |                     |<-- rows -------------|
-  |                        |<-- JSON response ---|                      |
-  |<-- rendered HTML ------|                     |                      |
+```mermaid
+sequenceDiagram
+    participant Browser
+    participant NextJS as Next.js
+    participant FlaskAPI as Flask API
+    participant PostgreSQL
+
+    Browser->>NextJS: GET /apps
+    NextJS->>FlaskAPI: GET /api/apps
+    FlaskAPI->>PostgreSQL: SELECT * FROM ...
+    PostgreSQL-->>FlaskAPI: rows
+    FlaskAPI-->>NextJS: JSON response
+    NextJS-->>Browser: rendered HTML
 ```
 
 ### Streaming Workflow Execution
 
-```
-Browser              Flask API           GraphEngine          Worker Threads
-  |                     |                     |                     |
-  |-- POST /run ------->|                     |                     |
-  |                     |-- create engine --->|                     |
-  |                     |                     |-- start workers --->|
-  |                     |                     |-- enqueue root ---->|
-  |<-- SSE: started ----|<-- yield event -----|                     |
-  |                     |                     |    +-- execute node |
-  |                     |                     |<-- | NodeRunStarted |
-  |<-- SSE: node_start -|<-- yield event -----|    |                |
-  |                     |                     |<-- | NodeRunSucceed |
-  |<-- SSE: node_end ---|<-- yield event -----|    +--------------->|
-  |                     |                     |                     |
-  |<-- SSE: finished ---|<-- yield event -----|-- stop workers ---->|
+```mermaid
+sequenceDiagram
+    participant Browser
+    participant FlaskAPI as Flask API
+    participant GraphEngine
+    participant Workers as Worker Threads
+
+    Browser->>FlaskAPI: POST /run
+    FlaskAPI->>GraphEngine: create engine
+    GraphEngine->>Workers: start workers
+    GraphEngine->>Workers: enqueue root
+    GraphEngine-->>FlaskAPI: yield event
+    FlaskAPI-->>Browser: SSE: started
+    Workers->>Workers: execute node
+    Workers->>GraphEngine: NodeRunStarted
+    GraphEngine-->>FlaskAPI: yield event
+    FlaskAPI-->>Browser: SSE: node_start
+    Workers->>GraphEngine: NodeRunSucceeded
+    GraphEngine-->>FlaskAPI: yield event
+    FlaskAPI-->>Browser: SSE: node_end
+    GraphEngine->>Workers: stop workers
+    GraphEngine-->>FlaskAPI: yield event
+    FlaskAPI-->>Browser: SSE: finished
 ```
 
 ### Async Task Dispatch (Dataset Indexing)
 
-```
-Flask API              Redis (Broker)        Celery Worker         PostgreSQL
-  |                        |                     |                     |
-  |-- task.delay() ------->|                     |                     |
-  |                        |-- LPUSH queue ----->|                     |
-  |<-- task_id ------------|                     |                     |
-  |                        |                     |-- BRPOP queue       |
-  |                        |                     |<-- task payload     |
-  |                        |                     |-- process docs ---->|
-  |                        |                     |-- INSERT chunks --->|
-  |                        |                     |-- embed + index     |
-  |                        |                     |-- UPDATE status --->|
+```mermaid
+sequenceDiagram
+    participant FlaskAPI as Flask API
+    participant Redis as Redis (Broker)
+    participant CeleryWorker as Celery Worker
+    participant PostgreSQL
+
+    FlaskAPI->>Redis: task.delay()
+    Redis->>CeleryWorker: LPUSH queue
+    Redis-->>FlaskAPI: task_id
+    CeleryWorker->>Redis: BRPOP queue
+    Redis-->>CeleryWorker: task payload
+    CeleryWorker->>PostgreSQL: process docs
+    CeleryWorker->>PostgreSQL: INSERT chunks
+    CeleryWorker->>CeleryWorker: embed + index
+    CeleryWorker->>PostgreSQL: UPDATE status
 ```
 
 ## Backend Architecture
@@ -205,38 +200,34 @@ def is_enabled() -> bool:   # optional
 
 ### Domain-Driven Design Layers
 
-```
-+------------------------------------------------------------------+
-|                        Controllers Layer                          |
-|  api/controllers/                                                |
-|  Flask Blueprints + Flask-RESTful Resources                      |
-|  Input validation, auth decorators, response formatting          |
-+------------------------------------------------------------------+
-                              |
-                              v
-+------------------------------------------------------------------+
-|                         Services Layer                            |
-|  api/services/                                                   |
-|  Business logic orchestration, transaction management            |
-|  Cross-domain coordination                                       |
-+------------------------------------------------------------------+
-                              |
-                              v
-+------------------------------------------------------------------+
-|                       Core Domain Layer                           |
-|  api/core/                                                       |
-|  +----------+ +--------+ +-------+ +--------+ +---------+       |
-|  | workflow/ | |  rag/  | | app/  | |plugin/ | |trigger/ |       |
-|  +----------+ +--------+ +-------+ +--------+ +---------+       |
-|  Pure business logic, no framework dependencies                  |
-+------------------------------------------------------------------+
-                              |
-                              v
-+------------------------------------------------------------------+
-|                       Infrastructure Layer                        |
-|  api/extensions/  api/models/  api/storage/                      |
-|  Database models (SQLAlchemy), Redis, S3, external APIs          |
-+------------------------------------------------------------------+
+```mermaid
+graph TD
+    subgraph Controllers["Controllers Layer"]
+        ControllersDesc["api/controllers/\nFlask Blueprints + Flask-RESTful Resources\nInput validation, auth decorators, response formatting"]
+    end
+    subgraph Services["Services Layer"]
+        ServicesDesc["api/services/\nBusiness logic orchestration, transaction management\nCross-domain coordination"]
+    end
+    subgraph CoreDomain["Core Domain Layer"]
+        CoreDesc["api/core/\nPure business logic, no framework dependencies"]
+        Workflow["workflow/"]
+        RAG["rag/"]
+        App["app/"]
+        Plugin["plugin/"]
+        Trigger["trigger/"]
+    end
+    subgraph Infrastructure["Infrastructure Layer"]
+        InfraDesc["api/extensions/ · api/models/ · api/storage/\nDatabase models (SQLAlchemy), Redis, S3, external APIs"]
+    end
+
+    Controllers --> Services
+    Services --> CoreDomain
+    CoreDomain --> Infrastructure
+
+    click Workflow "/docs/architecture/workflow-engine" "Workflow Engine"
+    click RAG "/docs/architecture/rag-pipeline" "RAG Pipeline"
+    click Plugin "/docs/architecture/plugin-system" "Plugin System"
+    click Trigger "/docs/architecture/trigger-system" "Trigger System"
 ```
 
 ### Configuration System
@@ -333,11 +324,12 @@ web/
 
 The frontend consumes streaming workflow events via a custom SSE wrapper:
 
-```
-request()  -->  fetch() with ReadableStream
-           -->  Parse SSE events (data: {...}\n\n)
-           -->  Dispatch to component state
-           -->  React re-renders with new data
+```mermaid
+graph LR
+    Request["request()"] --> Fetch["fetch() with ReadableStream"]
+    Fetch --> Parse["Parse SSE events\n(data: ...\\n\\n)"]
+    Parse --> Dispatch["Dispatch to\ncomponent state"]
+    Dispatch --> Render["React re-renders\nwith new data"]
 ```
 
 ## Observability
@@ -346,17 +338,11 @@ request()  -->  fetch() with ReadableStream
 
 OTEL instrumentation is wired across multiple layers:
 
-```
-+-------------------+     +--------------------+     +------------------+
-|   Flask Request   |     |   Celery Task      |     |  Workflow Node   |
-|   (auto-instr.)   |     |   (auto-instr.)    |     |  (ObservLayer)   |
-+--------+----------+     +--------+-----------+     +--------+---------+
-         |                         |                          |
-         v                         v                          v
-+------------------------------------------------------------------+
-|                   OTEL Collector / Exporter                      |
-|              (Jaeger, Zipkin, OTLP, or stdout)                   |
-+------------------------------------------------------------------+
+```mermaid
+graph TD
+    FlaskReq["Flask Request\n(auto-instrumented)"] --> OTELCollector["OTEL Collector / Exporter\n(Jaeger, Zipkin, OTLP, or stdout)"]
+    CeleryTask["Celery Task\n(auto-instrumented)"] --> OTELCollector
+    WorkflowNode["Workflow Node\n(ObservabilityLayer)"] --> OTELCollector
 ```
 
 Components instrumented:
@@ -402,6 +388,32 @@ at rest. The `Tenant.encrypt_public_key` field stores the public key;
 the private key is derived from the system secret key.
 
 See [07-Multi-Tenancy](/docs/architecture/multi-tenancy) for details.
+
+## Chat Request Flow
+
+```mermaid
+sequenceDiagram
+    participant User as Browser
+    participant NextJS as Next.js SSR
+    participant Flask as Flask API
+    participant Redis
+    participant Celery as Celery Worker
+    participant LLM as LLM Provider
+
+    User->>NextJS: POST /chat-messages
+    NextJS->>Flask: POST /api/chat-messages
+    Flask->>Flask: Authenticate (JWT)
+    Flask->>Flask: Load App config
+    Flask->>Redis: Check rate limits
+    Flask->>Celery: Dispatch workflow execution
+    Celery->>LLM: Stream LLM inference
+    LLM-->>Celery: Token stream
+    Celery-->>Redis: Publish tokens (pub/sub)
+    Redis-->>Flask: Subscribe to stream
+    Flask-->>NextJS: SSE token events
+    NextJS-->>User: Rendered streaming response
+    Celery->>Flask: Persist execution records
+```
 
 ## Cross-References
 

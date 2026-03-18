@@ -7,6 +7,16 @@ This document covers the practical patterns you need to follow when writing
 backend code for Pulse. Every example is drawn from or modeled on the actual
 codebase.
 
+## Architecture Layers
+
+```mermaid
+graph TD
+    Controller["Controller"] -->|Parse HTTP| Service["Service"]
+    Service -->|Business Logic| Core["Core Domain"]
+    Core -->|Data Access| Repository["Repository"]
+    Repository -->|SQL| Database["Database"]
+```
+
 ## Flask App Factory
 
 Pulse uses the app factory pattern. The application is created in

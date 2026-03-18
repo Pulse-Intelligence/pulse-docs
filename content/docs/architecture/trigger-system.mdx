@@ -9,24 +9,12 @@ model for managing external event sources.
 
 ## Trigger Types
 
-```
-+------------------+     +------------------+     +------------------+
-| WEBHOOK          |     | SCHEDULE         |     | PLUGIN           |
-| External HTTP    |     | Cron-based       |     | Plugin-generated |
-| POST to endpoint |     | periodic exec    |     | events           |
-+--------+---------+     +--------+---------+     +--------+---------+
-         |                        |                        |
-         v                        v                        v
-+------------------------------------------------------------------+
-|                    TriggerManager                                |
-|  api/core/trigger/trigger_manager.py                            |
-+------------------------------------------------------------------+
-         |                        |                        |
-         v                        v                        v
-+------------------------------------------------------------------+
-|                    Workflow Engine                                |
-|  Trigger node -> downstream nodes -> execution                   |
-+------------------------------------------------------------------+
+```mermaid
+graph TD
+    Webhook["WEBHOOK\nExternal HTTP\nPOST to endpoint"] --> TriggerManager["TriggerManager\napi/core/trigger/trigger_manager.py"]
+    Schedule["SCHEDULE\nCron-based\nperiodic exec"] --> TriggerManager
+    PluginTrigger["PLUGIN\nPlugin-generated\nevents"] --> TriggerManager
+    TriggerManager --> WorkflowEngine["Workflow Engine\nTrigger node -> downstream nodes -> execution"]
 ```
 
 ## TriggerManager
@@ -118,43 +106,39 @@ class PluginTriggerProviderController:
 
 ## Webhook Flow
 
-```
-External Service          Pulse API            TriggerService        Workflow Engine
-     |                       |                      |                      |
-     |-- POST /webhook ----->|                      |                      |
-     |   (payload)           |                      |                      |
-     |                       |-- process_endpoint ->|                      |
-     |                       |                      |                      |
-     |                       |   +-- validate subscription               |
-     |                       |   +-- invoke_trigger_event()               |
-     |                       |   |   (via PluginTriggerClient)            |
-     |                       |   |                                        |
-     |                       |   +-- dispatch_triggered_workflows_async() |
-     |                       |                      |-- Celery task ------>|
-     |                       |                      |                      |
-     |<-- 200 OK ------------|                      |    Execute workflow  |
-     |                       |                      |    with trigger vars |
+```mermaid
+sequenceDiagram
+    participant ExtService as External Service
+    participant PulseAPI as Pulse API
+    participant TriggerSvc as TriggerService
+    participant WorkflowEngine as Workflow Engine
+
+    ExtService->>PulseAPI: POST /webhook (payload)
+    PulseAPI->>TriggerSvc: process_endpoint
+    TriggerSvc->>TriggerSvc: validate subscription
+    TriggerSvc->>TriggerSvc: invoke_trigger_event()\n(via PluginTriggerClient)
+    TriggerSvc->>TriggerSvc: dispatch_triggered_workflows_async()
+    TriggerSvc->>WorkflowEngine: Celery task
+    PulseAPI-->>ExtService: 200 OK
+    WorkflowEngine->>WorkflowEngine: Execute workflow\nwith trigger vars
 ```
 
 ## Schedule Flow
 
 Scheduled triggers use Celery Beat for periodic polling:
 
-```
-Celery Beat                 Schedule Poller          Trigger Executor
-     |                           |                         |
-     |-- poll_workflow_          |                         |
-     |   schedules() ---------->|                         |
-     |   (every N minutes)      |                         |
-     |                          |-- query active          |
-     |                          |   schedules from DB     |
-     |                          |                         |
-     |                          |-- for each due          |
-     |                          |   schedule:             |
-     |                          |-- dispatch_async ------>|
-     |                          |                         |
-     |                          |                    Execute workflow
-     |                          |                    with schedule vars
+```mermaid
+sequenceDiagram
+    participant Beat as Celery Beat
+    participant Poller as Schedule Poller
+    participant Executor as Trigger Executor
+
+    Beat->>Poller: poll_workflow_schedules()\n(every N minutes)
+    Poller->>Poller: Query active schedules from DB
+    loop For each due schedule
+        Poller->>Executor: dispatch_async
+    end
+    Executor->>Executor: Execute workflow\nwith schedule vars
 ```
 
 Configuration in `api/extensions/ext_celery.py`:
@@ -171,41 +155,30 @@ if dify_config.ENABLE_WORKFLOW_SCHEDULE_POLLER_TASK:
 
 Plugin triggers allow external plugins to define custom event sources:
 
-```
-Plugin Daemon              Plugin Code            TriggerManager        Workflow
-     |                        |                       |                    |
-     |-- subscribe() -------->|                       |                    |
-     |   (register webhook    |                       |                    |
-     |    with external svc)  |                       |                    |
-     |                        |                       |                    |
-     |<-- Subscription -------|                       |                    |
-     |   {id, metadata}       |                       |                    |
-     |                        |                       |                    |
-     |----- later: event ---->|                       |                    |
-     |   from external svc    |                       |                    |
-     |                        |-- invoke_trigger ---->|                    |
-     |                        |   event()             |-- execute -------->|
-     |                        |                       |   workflow         |
+```mermaid
+sequenceDiagram
+    participant Daemon as Plugin Daemon
+    participant Plugin as Plugin Code
+    participant TM as TriggerManager
+    participant WF as Workflow
+
+    Daemon->>Plugin: subscribe()\n(register webhook with external svc)
+    Plugin-->>Daemon: Subscription {id, metadata}
+    Note over Daemon,Plugin: Later: event from external service
+    Daemon->>Plugin: event from external svc
+    Plugin->>TM: invoke_trigger_event()
+    TM->>WF: execute workflow
 ```
 
 ## Subscription Lifecycle
 
-```
-              +-------------+
-              |   Created   |  subscribe_trigger()
-              +------+------+
-                     |
-                     v
-              +------+------+
-              |   Active    |  Receiving events
-              +------+------+
-                    / \
-                   /   \
-        refresh   /     \   unsubscribe
-                 /       \
-        +-------v-+   +--v----------+
-        | Renewed |   | Unsubscribed|
-        +---------+   +-------------+
+```mermaid
+stateDiagram-v2
+    [*] --> Created : subscribe_trigger()
+    Created --> Active : Receiving events
+    Active --> Renewed : refresh
+    Active --> Unsubscribed : unsubscribe
+    Renewed --> Active
 ```
 
 ### Subscription Refresh
@@ -254,31 +227,21 @@ class TriggerDebugEventBus:
 
 ### Debug Event Bus Flow
 
-```
-Debug Client (Browser)        Redis                    Trigger Handler
-     |                          |                           |
-     |-- poll(address_id) ----->|                           |
-     |                          |                           |
-     |   LUA_SELECT:            |                           |
-     |   1. Check inbox key     |                           |
-     |   2. If event exists,    |                           |
-     |      return + delete     |                           |
-     |   3. If no event,        |                           |
-     |      add to waiting pool |                           |
-     |                          |                           |
-     |<-- null (waiting) -------|                           |
-     |                          |                           |
-     |                          |<-- dispatch(event) -------|
-     |                          |                           |
-     |                          |   LUA_DISPATCH:           |
-     |                          |   1. Get all waiting addrs|
-     |                          |   2. Delete waiting pool  |
-     |                          |   3. SET event for each   |
-     |                          |      addr with TTL        |
-     |                          |                           |
-     |-- poll(address_id) ----->|                           |
-     |                          |                           |
-     |<-- event data -----------|                           |
+```mermaid
+sequenceDiagram
+    participant Client as Debug Client (Browser)
+    participant Redis
+    participant Handler as Trigger Handler
+
+    Client->>Redis: poll(address_id)
+    Note over Redis: LUA_SELECT:\n1. Check inbox key\n2. If event exists, return + delete\n3. If no event, add to waiting pool
+    Redis-->>Client: null (waiting)
+
+    Handler->>Redis: dispatch(event)
+    Note over Redis: LUA_DISPATCH:\n1. Get all waiting addrs\n2. Delete waiting pool\n3. SET event for each addr with TTL
+
+    Client->>Redis: poll(address_id)
+    Redis-->>Client: event data
 ```
 
 ### Redis Key Structure

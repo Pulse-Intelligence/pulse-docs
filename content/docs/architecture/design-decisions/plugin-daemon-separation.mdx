@@ -31,16 +31,29 @@ safely execute plugin code while maintaining performance and isolation.
 Run plugins in a **separate Go service** (the Plugin Daemon) that
 communicates with the Pulse API over HTTP/gRPC:
 
-```
-+-- Pulse API (Python) --------+     +-- Plugin Daemon (Go) -----------+
-|                               |     |                                 |
-|  Workflow execution           |     |  Plugin Runtime                 |
-|    |                          |     |    |                             |
-|    +-- PluginClient.invoke() -+---->|    +-- Load plugin package      |
-|    |                          |     |    +-- Verify signature          |
-|    +-- Receive result  <------+<----|    +-- Execute in sandbox       |
-|                               |     |    +-- Return result             |
-+-------------------------------+     +---------------------------------+
+```mermaid
+graph LR
+    subgraph PulseAPI["Pulse API (Python)"]
+        WFExec["Workflow execution"]
+        PluginInvoke["PluginClient.invoke()"]
+        ReceiveResult["Receive result"]
+    end
+
+    subgraph PluginDaemon["Plugin Daemon (Go)"]
+        PluginRuntime["Plugin Runtime"]
+        LoadPkg["Load plugin package"]
+        VerifySig["Verify signature"]
+        ExecSandbox["Execute in sandbox"]
+        ReturnResult["Return result"]
+    end
+
+    WFExec --> PluginInvoke
+    PluginInvoke -->|HTTP/gRPC| PluginRuntime
+    PluginRuntime --> LoadPkg
+    PluginRuntime --> VerifySig
+    PluginRuntime --> ExecSandbox
+    ExecSandbox --> ReturnResult
+    ReturnResult -->|response| ReceiveResult
 ```
 
 ### Key Design Choices
@@ -61,16 +74,14 @@ communicates with the Pulse API over HTTP/gRPC:
 
 ### Communication Protocol
 
-```
-API Server                          Plugin Daemon
-    |                                     |
-    |-- POST /invoke  ------------------>|
-    |   {plugin_id, method, params}      |
-    |                                     |
-    |   Plugin executes...               |
-    |                                     |
-    |<-- 200 {result}  ------------------|
-    |                                     |
+```mermaid
+sequenceDiagram
+    participant API as API Server
+    participant Daemon as Plugin Daemon
+
+    API->>Daemon: POST /invoke\n{plugin_id, method, params}
+    Note over Daemon: Plugin executes...
+    Daemon-->>API: 200 {result}
 ```
 
 For streaming responses (e.g., LLM provider plugins), the daemon uses

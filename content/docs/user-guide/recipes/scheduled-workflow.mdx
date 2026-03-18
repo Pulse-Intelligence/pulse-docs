@@ -149,16 +149,15 @@ Scheduled workflows run unattended, so error handling is important:
 3. On the error path, add an **HTTP Request** or **End** node that
    logs the error or sends an alert:
 
-```
-[Schedule Trigger] --> [Fetch News] --> [IF/ELSE: Success?]
-                                            |
-                               +-- Yes -----+-- No --------+
-                               |                            |
-                        [Summarize News]            [Send Error Alert]
-                               |                            |
-                        [Send to Slack]                  [End]
-                               |
-                            [End]
+```mermaid
+graph TD
+    Trigger["Schedule Trigger"] --> FetchNews["Fetch News"]
+    FetchNews --> IfElse{"Success?"}
+    IfElse -->|Yes| Summarize["Summarize News"]
+    Summarize --> SendSlack["Send to Slack"]
+    SendSlack --> EndOK["End"]
+    IfElse -->|No| ErrorAlert["Send Error Alert"]
+    ErrorAlert --> EndErr["End"]
 ```
 
 ### Step 7: Review and Publish

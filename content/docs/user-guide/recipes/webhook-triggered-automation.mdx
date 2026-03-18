@@ -141,14 +141,15 @@ Keep it warm, brief (under 100 words), and genuine.
 
 ### Step 7: Review the Complete Workflow
 
-```
-[Webhook Trigger] --> [Analyze Sentiment] --> [IF/ELSE]
-                                                |
-                                 +-- NEGATIVE --+-- ELSE --------+
-                                 |                               |
-                         [Draft Apology] --> [Notify Team]   [Draft Thank You]
-                                 |                               |
-                              [End]                           [End]
+```mermaid
+graph TD
+    Webhook["Webhook Trigger"] --> Analyze["Analyze Sentiment"]
+    Analyze --> IfElse{"IF/ELSE"}
+    IfElse -->|NEGATIVE| DraftApology["Draft Apology"]
+    DraftApology --> NotifyTeam["Notify Team"]
+    NotifyTeam --> EndNeg["End"]
+    IfElse -->|ELSE| DraftThankYou["Draft Thank You"]
+    DraftThankYou --> EndPos["End"]
 ```
 
 ### Step 8: Connect Your External System

@@ -11,14 +11,22 @@ a transformation function to input data.
 
 Adding a workflow node type touches several layers:
 
-```
-  Backend                          Frontend
-  +---------------------------+   +---------------------------+
-  | 1. Node class             |   | 5. Node component         |
-  | 2. Service methods        |   | 6. Node config panel      |
-  | 3. Controller endpoints   |   | 7. i18n strings           |
-  | 4. Tests                  |   | 8. Tests                  |
-  +---------------------------+   +---------------------------+
+```mermaid
+graph LR
+    subgraph Backend
+        NodeClass["1. Node class"]
+        ServiceMethods["2. Service methods"]
+        ControllerEndpoints["3. Controller endpoints"]
+        BackendTests["4. Tests"]
+    end
+    subgraph Frontend
+        NodeComponent["5. Node component"]
+        ConfigPanel["6. Node config panel"]
+        I18n["7. i18n strings"]
+        FrontendTests["8. Tests"]
+    end
+    NodeClass --> ServiceMethods --> ControllerEndpoints --> BackendTests
+    NodeComponent --> ConfigPanel --> I18n --> FrontendTests
 ```
 
 ## Step 1: Define the Node Type Enum

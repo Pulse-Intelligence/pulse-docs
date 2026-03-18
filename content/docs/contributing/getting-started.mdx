@@ -59,16 +59,10 @@ docker compose -f docker-compose.middleware.yaml -p pulse up -d
 
 This starts:
 
-```
-+------------------+       +------------------+
-|    Weaviate      |       |    SSRF Proxy    |
-|    (port 8080)   |       |    (port 3128)   |
-+------------------+       +------------------+
-
-+------------------+       +------------------+
-|    Sandbox       |       |  Plugin Daemon   |
-|    (port 8194)   |       |  (port 5002)     |
-+------------------+       +------------------+
+```mermaid
+graph LR
+    Weaviate["Weaviate\nport 8080"] ~~~ SSRFProxy["SSRF Proxy\nport 3128"]
+    Sandbox["Sandbox\nport 8194"] ~~~ PluginDaemon["Plugin Daemon\nport 5002"]
 ```
 
 Note: Redis and PostgreSQL are expected to be running on the host machine
@@ -228,35 +222,15 @@ Check the Celery worker terminal for the "ready" message:
 
 Here is how the pieces fit together in development:
 
-```
-  Browser (localhost:3000)
-      |
-      v
-  +-------------------+
-  |   Next.js 15      |    Frontend (web/)
-  |   Dev Server       |
-  +-------------------+
-      |  API calls
-      v
-  +-------------------+
-  |   Flask API       |    Backend (api/)
-  |   (port 5001)     |
-  +--------+----------+
-      |    |    |
-      v    v    v
-  +------+ +-----+ +----------+
-  |PG 16 | |Redis| | Weaviate |   Middleware (docker/)
-  +------+ +-----+ +----------+
-      |
-      v
-  +-------------------+
-  |   Celery Workers  |    Async tasks (api/tasks/)
-  +-------------------+
-      |
-      v
-  +-------------------+
-  |  Plugin Daemon    |    Plugin execution (docker/)
-  +-------------------+
+```mermaid
+graph TD
+    Browser["Browser (localhost:3000)"] --> NextJS["Next.js 15 Dev Server\nFrontend (web/)"]
+    NextJS -->|API calls| Flask["Flask API (port 5001)\nBackend (api/)"]
+    Flask --> PG["PostgreSQL 16"]
+    Flask --> Redis["Redis"]
+    Flask --> Weaviate["Weaviate"]
+    Flask --> Celery["Celery Workers\nAsync tasks (api/tasks/)"]
+    Celery --> PluginDaemon["Plugin Daemon\nPlugin execution (docker/)"]
 ```
 
 ## Common Setup Issues

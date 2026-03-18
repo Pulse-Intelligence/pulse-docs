@@ -11,14 +11,15 @@ concrete patterns you can copy.
 
 All new features and bug fixes should follow Test-Driven Development:
 
-```
-  1. RED     Write a test that fails
-      |
-  2. GREEN   Write minimal code to make it pass
-      |
-  3. REFACTOR  Improve the code while tests stay green
-      |
-  Repeat
+```mermaid
+graph LR
+    WriteTest["Write Test"] --> RunTest1["Run Test"]
+    RunTest1 -->|Fails| WriteCode["Write Code"]
+    WriteCode --> RunTest2["Run Test"]
+    RunTest2 -->|Passes| Refactor["Refactor"]
+    Refactor --> WriteTest
+    style WriteTest fill:#f66
+    style RunTest2 fill:#6f6
 ```
 
 This workflow ensures:

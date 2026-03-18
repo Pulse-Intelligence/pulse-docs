@@ -11,33 +11,22 @@ need to go from zero to productive contributor.
 Follow these documents in order for the fastest ramp-up. Each builds on the
 previous one.
 
-```
-  1. Getting Started       Set up your local dev environment
-         |
-  2. Project Structure     Understand where things live
-         |
-  3. First Contribution    Learn the branch/test/PR workflow
-         |
-  +------+------+
-  |             |
-  4. Backend    5. Frontend     Coding patterns for your stack
-  Patterns      Patterns
-         |
-  6. Adding a Feature      End-to-end walkthrough
-         |
-  7. Testing Guide         Write effective tests
-         |
-  8. Code Review           What reviewers look for
-  Checklist
-         |
-  +------+------+------+
-  |      |      |      |
-  9.    10.    11.     |
-  DB    Celery Common  |
-  &     &Async Mistakes|
-  Migrations           |
-                       v
-              You are ready!
+```mermaid
+graph TD
+    GettingStarted["1. Getting Started"] --> ProjectStructure["2. Project Structure"]
+    ProjectStructure --> FirstContribution["3. First Contribution"]
+    FirstContribution --> BackendPatterns["4. Backend Patterns"]
+    FirstContribution --> FrontendPatterns["5. Frontend Patterns"]
+    BackendPatterns --> AddingFeature["6. Adding a Feature"]
+    FrontendPatterns --> AddingFeature
+    AddingFeature --> TestingGuide["7. Testing Guide"]
+    TestingGuide --> CodeReview["8. Code Review Checklist"]
+    CodeReview --> DB["9. DB & Migrations"]
+    CodeReview --> Celery["10. Celery & Async"]
+    CodeReview --> Mistakes["11. Common Mistakes"]
+    DB --> Ready["You are ready!"]
+    Celery --> Ready
+    Mistakes --> Ready
 ```
 
 ## Document Index

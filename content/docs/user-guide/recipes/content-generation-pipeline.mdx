@@ -28,6 +28,16 @@ By the end of this recipe, you will have a workflow that:
 
 ---
 
+## Overview
+
+```mermaid
+graph LR
+    Start["Start\n(topic, audience,\ntone, word count)"] --> Outline["Generate Outline"]
+    Outline --> Draft["Write Draft"]
+    Draft --> Refine["Refine Article"]
+    Refine --> End["End\n(polished article)"]
+```
+
 ## Steps
 
 ### Step 1: Create the Workflow App
@@ -133,13 +143,12 @@ Return the complete, polished article.
 
 Your workflow should look like:
 
-```
-[Start] --> [Generate Outline] --> [Write Draft] --> [Refine Article] --> [End]
-  |               |                    |                  |                 |
-  topic,        outline             full draft        polished          final
-  audience,                                           article           output
-  tone,
-  word_count
+```mermaid
+graph LR
+    Start["Start\n(topic, audience,\ntone, word count)"] --> Outline["Generate Outline\n(outline)"]
+    Outline --> Draft["Write Draft\n(full draft)"]
+    Draft --> Refine["Refine Article\n(polished article)"]
+    Refine --> End["End\n(final output)"]
 ```
 
 ---

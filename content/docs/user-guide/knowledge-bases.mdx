@@ -53,26 +53,14 @@ information when someone asks a question.
 
 Here is what happens behind the scenes when you use a knowledge base:
 
-```
-1. You upload a document (e.g., "Product Manual.pdf")
-                |
-                v
-2. Pulse reads the document and breaks it into smaller pieces
-   (like cutting a book into individual paragraphs)
-                |
-                v
-3. Pulse converts each piece into a format it can search quickly
-   (like creating an index at the back of a book)
-                |
-                v
-4. When a user asks a question, Pulse searches the index
-   to find the most relevant pieces
-                |
-                v
-5. Those relevant pieces are sent to the AI along with the question
-                |
-                v
-6. The AI uses the information to give a specific, accurate answer
+```mermaid
+graph LR
+    Upload["Upload Document"] --> Split["Split into Chunks"]
+    Split --> Embed["Create Embeddings"]
+    Embed --> Store["Store in Vector DB"]
+    Store --> Ask["User Asks Question"]
+    Ask --> Find["Find Similar Chunks"]
+    Find --> Answer["AI Generates Answer"]
 ```
 
 You do not need to understand the technical details. Just know that
@@ -158,14 +146,12 @@ more precise results.
 
 Think of it like cutting up a newspaper article:
 
-```
-Original document (10 pages)
-     |
-     v
-Chunk 1: "Introduction to our product line..."  (first 500 words)
-Chunk 2: "Pricing and availability..."          (next 500 words)
-Chunk 3: "Technical specifications..."          (next 500 words)
-... and so on
+```mermaid
+graph TD
+    Doc["Original document (10 pages)"] --> Chunk1["Chunk 1: Introduction\n(first 500 words)"]
+    Doc --> Chunk2["Chunk 2: Pricing\n(next 500 words)"]
+    Doc --> Chunk3["Chunk 3: Tech specs\n(next 500 words)"]
+    Doc --> More["...and so on"]
 ```
 
 ### Chunking Settings

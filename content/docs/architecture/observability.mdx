@@ -29,18 +29,11 @@ observability integrations.
 
 Pulse uses a layered observability approach:
 
-```
-+--------------------+     +------------------+     +------------------+
-|  OpenTelemetry     |     |  Sentry          |     |  LLM Tracers     |
-|  (traces, metrics) |     |  (errors)        |     | (Langfuse, etc.) |
-+--------+-----------+     +--------+---------+     +--------+---------+
-         |                          |                        |
-         v                          v                        v
-+--------+------------+    +--------+---------+    +---------+----------+
-| OTLP Collector      |    | Sentry Cloud     |    | Langfuse / Opik /  |
-| (Jaeger, Grafana,   |    | or Self-hosted   |    | Langsmith          |
-|  Honeycomb, etc.)   |    +------------------+    +--------------------+
-+---------------------+
+```mermaid
+graph TD
+    OTEL["OpenTelemetry\n(traces, metrics)"] --> OTLPCollector["OTLP Collector\n(Jaeger, Grafana, Honeycomb, etc.)"]
+    Sentry["Sentry\n(errors)"] --> SentryCloud["Sentry Cloud\nor Self-hosted"]
+    LLMTracers["LLM Tracers\n(Langfuse, etc.)"] --> LLMPlatforms["Langfuse / Opik /\nLangsmith"]
 ```
 
 | Signal   | Technology        | Purpose                              |
@@ -155,26 +148,14 @@ node execution within a workflow run.
 
 ### Architecture
 
-```
-GraphEngine
-  |
-  +-- layers: [ObservabilityLayer, ...]
-  |
-  +-- WorkerPool
-       |
-       +-- Worker executes node
-            |
-            +-- ObservabilityLayer.before_node_execution()
-            |       Creates span, sets OTel context
-            |
-            +-- Node.run()
-            |       Auto-instrumented calls inherit span context:
-            |       - httpx calls to LLM providers
-            |       - SQLAlchemy queries
-            |       - Redis operations
-            |
-            +-- ObservabilityLayer.after_node_execution()
-                    Sets span attributes, status, and ends span
+```mermaid
+graph TD
+    GE["GraphEngine"] --> Layers["layers: ObservabilityLayer, ..."]
+    GE --> WP["WorkerPool"]
+    WP --> Worker["Worker executes node"]
+    Worker --> BeforeExec["ObservabilityLayer.before_node_execution()\nCreates span, sets OTel context"]
+    BeforeExec --> NodeRun["Node.run()\nAuto-instrumented calls inherit span context:\n- httpx calls to LLM providers\n- SQLAlchemy queries\n- Redis operations"]
+    NodeRun --> AfterExec["ObservabilityLayer.after_node_execution()\nSets span attributes, status, and ends span"]
 ```
 
 ### How It Works
@@ -203,24 +184,17 @@ self._parsers = {
 
 ### Resulting Trace Structure
 
-```
-[Workflow Run Span]
-  |
-  +-- [Start Node Span]
-  |
-  +-- [LLM Node Span]
-  |     |
-  |     +-- [httpx: POST openai.com/v1/chat/completions]
-  |
-  +-- [IF/ELSE Node Span]
-  |
-  +-- [Knowledge Retrieval Node Span]
-  |     |
-  |     +-- [SQLAlchemy: SELECT from document_segments]
-  |     +-- [httpx: POST embeddings API]
-  |     +-- [Redis: GET cached_embedding]
-  |
-  +-- [Answer Node Span]
+```mermaid
+graph TD
+    WFSpan["Workflow Run Span"] --> StartSpan["Start Node Span"]
+    WFSpan --> LLMSpan["LLM Node Span"]
+    LLMSpan --> HttpxLLM["httpx: POST openai.com/v1/chat/completions"]
+    WFSpan --> IfElseSpan["IF/ELSE Node Span"]
+    WFSpan --> KRSpan["Knowledge Retrieval Node Span"]
+    KRSpan --> SQLASpan["SQLAlchemy: SELECT from document_segments"]
+    KRSpan --> HttpxEmbed["httpx: POST embeddings API"]
+    KRSpan --> RedisSpan["Redis: GET cached_embedding"]
+    WFSpan --> AnswerSpan["Answer Node Span"]
 ```
 
 ---
@@ -274,17 +248,12 @@ Metrics are exported at configurable intervals:
 When a workflow is triggered by an HTTP request and executed by a Celery
 worker, trace context must propagate across the process boundary:
 
-```
-Flask API (request span)
-  |
-  +-- Enqueue Celery task (with trace context in headers)
-       |
-       v
-Celery Worker (task span, linked to request span)
-  |
-  +-- GraphEngine (workflow span)
-       |
-       +-- Node spans (with inherited context)
+```mermaid
+graph TD
+    FlaskReq["Flask API (request span)"] --> EnqueueTask["Enqueue Celery task\n(with trace context in headers)"]
+    EnqueueTask --> CeleryWorker["Celery Worker\n(task span, linked to request span)"]
+    CeleryWorker --> GraphEngine["GraphEngine\n(workflow span)"]
+    GraphEngine --> NodeSpans["Node spans\n(with inherited context)"]
 ```
 
 ### Thread Context in Graph Engine

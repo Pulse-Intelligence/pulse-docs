@@ -119,6 +119,16 @@ export default WorkflowCard
 
 ## State Management
 
+```mermaid
+graph TD
+    Component["React Component"] --> Zustand["Zustand Store\n(Global state)"]
+    Component --> Jotai["Jotai Atom\n(Atomic state)"]
+    Component --> TanStack["TanStack Query\n(Server state)"]
+    Zustand -->|User session, workspace| SharedState["Shared across app"]
+    Jotai -->|UI toggles, local prefs| LocalState["Fine-grained reactivity"]
+    TanStack -->|API data, caching| ServerState["Fetch, cache, sync"]
+```
+
 Pulse uses three state management strategies for different needs:
 
 ### Zustand (Global State)

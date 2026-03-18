@@ -60,8 +60,9 @@ Think of a workflow like a flowchart: "First, receive the user's question.
 Then, search the knowledge base. Then, send the question and search results
 to the AI. Finally, show the answer."
 
-```
-[Receive Question] --> [Search Knowledge Base] --> [Ask AI] --> [Show Answer]
+```mermaid
+graph LR
+    ReceiveQuestion["Receive Question"] --> SearchKB["Search Knowledge Base"] --> AskAI["Ask AI"] --> ShowAnswer["Show Answer"]
 ```
 
 Workflows can branch (like an "if this, then that" rule), loop, and run
@@ -224,36 +225,29 @@ files them so they can be found later.
 
 Here is how all the concepts connect:
 
-```
-+-- Workspace --------------------------------------------------+
-|                                                                |
-|  +-- Model Providers ---+   +-- Knowledge Bases ---+          |
-|  |  OpenAI              |   |  Company Docs        |          |
-|  |  Anthropic           |   |  Product Manual      |          |
-|  |  Google AI           |   |  FAQ Database        |          |
-|  +-----------+----------+   +-----------+----------+          |
-|              |                          |                      |
-|              v                          v                      |
-|  +-- App: Customer Support Bot -------------------------+     |
-|  |                                                       |     |
-|  |  Mode: Advanced Chat                                  |     |
-|  |                                                       |     |
-|  |  Workflow:                                            |     |
-|  |  [Start] -> [Search KB] -> [LLM] -> [Answer]         |     |
-|  |                                                       |     |
-|  |  Uses: GPT-4 model + Company Docs knowledge base     |     |
-|  +-------------------------------------------------------+     |
-|                                                                |
-|  +-- App: Weekly Report Generator ----------------------+     |
-|  |                                                       |     |
-|  |  Mode: Workflow (scheduled, runs every Monday)        |     |
-|  |                                                       |     |
-|  |  Workflow:                                            |     |
-|  |  [Schedule Trigger] -> [HTTP: Get Data] -> [LLM:     |     |
-|  |   Summarize] -> [HTTP: Send Email]                    |     |
-|  +-------------------------------------------------------+     |
-|                                                                |
-+----------------------------------------------------------------+
+```mermaid
+graph TD
+    subgraph Workspace
+        subgraph ModelProviders["Model Providers"]
+            OpenAI["OpenAI"]
+            Anthropic["Anthropic"]
+            GoogleAI["Google AI"]
+        end
+        subgraph KnowledgeBases["Knowledge Bases"]
+            CompanyDocs["Company Docs"]
+            ProductManual["Product Manual"]
+            FAQDatabase["FAQ Database"]
+        end
+        subgraph SupportBot["App: Customer Support Bot\n(Advanced Chat)"]
+            SB_Start["Start"] --> SB_Search["Search KB"] --> SB_LLM["LLM"] --> SB_Answer["Answer"]
+        end
+        subgraph ReportGen["App: Weekly Report Generator\n(Workflow, runs every Monday)"]
+            RG_Trigger["Schedule Trigger"] --> RG_HTTP["HTTP: Get Data"] --> RG_LLM["LLM: Summarize"] --> RG_Email["HTTP: Send Email"]
+        end
+    end
+    ModelProviders --> SupportBot
+    KnowledgeBases --> SupportBot
+    ModelProviders --> ReportGen
 ```
 
 ### Summary

@@ -9,17 +9,20 @@ and result post-processing.
 
 ## Pipeline Overview
 
-```
-+-------+     +-------+     +-------+     +-------+     +----------+     +--------+
-|Extract|---->| Chunk |---->| Embed |---->| Index |---->| Retrieve |---->| Rerank |
-|       |     |       |     |       |     |       |     |          |     |        |
-| Parse |     | Split |     |Vectorize    | Store |     | Query    |     | Score  |
-| files |     | text  |     |text   |     |vectors|     | vectors  |     | & sort |
-+-------+     +-------+     +-------+     +-------+     +----------+     +--------+
-    |              |              |             |              |               |
-    v              v              v             v              v               v
- extractor/    splitter/     embedding/    datasource/   retrieval/    data_post_
-                                           vdb/                      processor/
+```mermaid
+graph LR
+    Extract["Extract\nParse files"] --> Chunk["Chunk\nSplit text"]
+    Chunk --> Embed["Embed\nVectorize text"]
+    Embed --> Index["Index\nStore vectors"]
+    Index --> Retrieve["Retrieve\nQuery vectors"]
+    Retrieve --> Rerank["Rerank\nScore & sort"]
+
+    Extract -.- ExtDir["extractor/"]
+    Chunk -.- SplitDir["splitter/"]
+    Embed -.- EmbedDir["embedding/"]
+    Index -.- VdbDir["datasource/vdb/"]
+    Retrieve -.- RetDir["retrieval/"]
+    Rerank -.- PostDir["data_post_processor/"]
 ```
 
 ## Directory Structure
@@ -67,25 +70,11 @@ Document extraction converts raw files into text. The extraction layer
 supports multiple file formats through specialized extractors in
 `api/core/rag/extractor/`.
 
-```
-Input File (PDF, DOCX, TXT, HTML, CSV, ...)
-    |
-    v
-+----------------------------+
-| ExtractSetting             |
-|  - datasource_type         |
-|  - upload_file / notion_id |
-|  - document_model          |
-+----------------------------+
-    |
-    v
-BaseIndexProcessor.extract(extract_setting)
-    |
-    v
-list[Document]
-  each with:
-    - page_content: str
-    - metadata: dict (doc_id, doc_hash, document_id, dataset_id)
+```mermaid
+graph TD
+    InputFile["Input File\n(PDF, DOCX, TXT, HTML, CSV, ...)"] --> ExtractSetting["ExtractSetting\n- datasource_type\n- upload_file / notion_id\n- document_model"]
+    ExtractSetting --> BaseExtract["BaseIndexProcessor.extract(extract_setting)"]
+    BaseExtract --> Documents["list[Document]\neach with:\n- page_content: str\n- metadata: dict"]
 ```
 
 ## Stage 2: Chunk (Text Splitting)
@@ -188,37 +177,17 @@ class CacheEmbedding(Embeddings):
 
 ### Embedding Cache Flow
 
-```
-texts[] ──> hash each text
-               |
-          +----v----+
-          | DB query |  SELECT * FROM embeddings
-          | by hash  |  WHERE model_name=? AND hash=? AND provider_name=?
-          +----+----+
-               |
-         cache hit?
-        /          \
-      YES           NO
-       |             |
-  use cached    +----v---------+
-  vector        | Model API    |
-                | (batched by  |
-                | max_chunks)  |
-                +----+---------+
-                     |
-                +----v---------+
-                | Normalize    |
-                | (L2 norm)    |
-                +----+---------+
-                     |
-                +----v---------+
-                | INSERT into  |
-                | embeddings   |
-                | table        |
-                +--------------+
-                     |
-                     v
-              Return all vectors
+```mermaid
+graph TD
+    Texts["texts[]"] --> Hash["Hash each text"]
+    Hash --> DBQuery["DB query by hash\nSELECT * FROM embeddings\nWHERE model_name=? AND hash=?\nAND provider_name=?"]
+    DBQuery --> CacheCheck{"Cache hit?"}
+    CacheCheck -->|YES| UseCached["Use cached vector"]
+    CacheCheck -->|NO| ModelAPI["Model API\n(batched by max_chunks)"]
+    ModelAPI --> Normalize["Normalize (L2 norm)"]
+    Normalize --> InsertDB["INSERT into\nembeddings table"]
+    InsertDB --> ReturnAll["Return all vectors"]
+    UseCached --> ReturnAll
 ```
 
 ## Stage 4: Index (Vector Store)
@@ -323,32 +292,14 @@ class RetrievalMethod:
 
 ### Hybrid Retrieval Architecture
 
-```
-                        query
-                          |
-              +-----------+-----------+
-              |                       |
-     +--------v--------+    +--------v--------+
-     | Semantic Search  |    | Full-Text (BM25)|
-     | (vector_store.   |    | (keyword_store. |
-     |  search_by_      |    |  search_by_     |
-     |  vector)         |    |  full_text)     |
-     +--------+---------+    +--------+--------+
-              |                       |
-              +-----------+-----------+
-                          |
-                 +--------v--------+
-                 | Merge + Dedup   |
-                 +--------+--------+
-                          |
-                 +--------v--------+
-                 | Rerank / Score  |
-                 | (DataPostProc.) |
-                 +--------+--------+
-                          |
-                 +--------v--------+
-                 | Top-K results   |
-                 +-----------------+
+```mermaid
+graph TD
+    Query["query"] --> SemanticSearch["Semantic Search\n(vector_store.search_by_vector)"]
+    Query --> FullTextSearch["Full-Text (BM25)\n(keyword_store.search_by_full_text)"]
+    SemanticSearch --> MergeDedup["Merge + Dedup"]
+    FullTextSearch --> MergeDedup
+    MergeDedup --> Rerank["Rerank / Score\n(DataPostProcessor)"]
+    Rerank --> TopK["Top-K results"]
 ```
 
 The `RetrievalService` uses `ThreadPoolExecutor` for parallel execution of
@@ -372,26 +323,11 @@ with ThreadPoolExecutor(
 The `DataPostProcessor` (`api/core/rag/data_post_processor/`) handles
 post-retrieval processing:
 
-```
-Retrieved Documents
-    |
-    v
-+-------------------+
-| Reranking         |
-|  - Model-based    |  Uses rerank model (Cohere, etc.)
-|  - Weighted       |  Combines semantic + keyword scores
-|  - Keyword weight |  BM25-based reweighting
-+-------------------+
-    |
-    v
-+-------------------+
-| Score Filtering   |
-|  - score_threshold|  Drop below threshold
-|  - top_k          |  Limit results
-+-------------------+
-    |
-    v
-Final Results
+```mermaid
+graph TD
+    Retrieved["Retrieved Documents"] --> Reranking["Reranking\n- Model-based (Cohere, etc.)\n- Weighted (semantic + keyword scores)\n- Keyword weight (BM25 reweighting)"]
+    Reranking --> ScoreFilter["Score Filtering\n- score_threshold (drop below)\n- top_k (limit results)"]
+    ScoreFilter --> FinalResults["Final Results"]
 ```
 
 ### Reranking Modes
@@ -408,17 +344,12 @@ class RerankMode:
 
 The `ParentChildIndexProcessor` creates hierarchical chunk relationships:
 
-```
-+---------------------------+
-|     Parent Chunk          |
-|  (larger context window)  |
-|                           |
-|  +--------+ +--------+   |
-|  | Child 1| | Child 2|   |
-|  | (small | | (small |   |
-|  | chunk) | | chunk) |   |
-|  +--------+ +--------+   |
-+---------------------------+
+```mermaid
+graph TD
+    subgraph ParentChunk["Parent Chunk (larger context window)"]
+        Child1["Child 1\n(small chunk)"]
+        Child2["Child 2\n(small chunk)"]
+    end
 ```
 
 During retrieval, child chunks are matched for precision, but parent chunks

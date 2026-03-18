@@ -9,28 +9,22 @@ Go-based daemon process and communicate with the Flask API via HTTP.
 
 ## Architecture Overview
 
-```
-+-----------------------------+        HTTP        +---------------------------+
-|       Flask API Server      |<------------------>|    Plugin Daemon (Go)     |
-|       (port 5001)           |                    |    (port 5002/5003)       |
-|                             |                    |                           |
-|  +-----------------------+  |    /plugin/{tid}/  |  +---------------------+  |
-|  | BasePluginClient      |--+---> management/*   |  | Plugin Runtime     |  |
-|  |  - _request()         |  |                    |  |  - Load plugins    |  |
-|  |  - _stream_request()  |  |    /plugin/{tid}/  |  |  - Execute funcs  |  |
-|  +-----------------------+  |<--- invoke/*       |  |  - Manage state   |  |
-|                             |                    |  +---------------------+  |
-|  +-----------------------+  |                    |                           |
-|  | impl/ adapters:       |  |    Inner API       |  +---------------------+  |
-|  |  tool.py              |  |<-------------------+--| Backwards Invoc.   |  |
-|  |  model.py             |  |    (port 5001)     |  | Plugin -> Pulse API|  |
-|  |  datasource.py        |  |                    |  +---------------------+  |
-|  |  agent.py             |  |                    |                           |
-|  |  trigger.py           |  |                    |  +---------------------+  |
-|  |  endpoint.py          |  |                    |  | Plugin Storage     |  |
-|  +-----------------------+  |                    |  | /app/storage       |  |
-+-----------------------------+                    |  +---------------------+  |
-                                                   +---------------------------+
+```mermaid
+graph LR
+    subgraph FlaskAPI["Flask API Server (port 5001)"]
+        BasePluginClient["BasePluginClient\n- _request()\n- _stream_request()"]
+        Adapters["impl/ adapters:\ntool.py, model.py\ndatasource.py, agent.py\ntrigger.py, endpoint.py"]
+    end
+
+    subgraph PluginDaemon["Plugin Daemon - Go (port 5002/5003)"]
+        PluginRuntime["Plugin Runtime\n- Load plugins\n- Execute funcs\n- Manage state"]
+        BackwardsInvoc["Backwards Invocation\nPlugin -> Pulse API"]
+        PluginStorage["Plugin Storage\n/app/storage"]
+    end
+
+    BasePluginClient -->|"/plugin/{tid}/\nmanagement/*"| PluginRuntime
+    PluginRuntime -->|"/plugin/{tid}/\ninvoke/*"| Adapters
+    BackwardsInvoc -->|"Inner API\n(port 5001)"| Adapters
 ```
 
 ## Plugin Categories
@@ -68,26 +62,14 @@ class BasePluginClient:
 
 ### Request Flow
 
-```
-Application Code
-    |
-    v
-PluginToolManager.invoke_tool(tenant_id, provider_id, tool_name, params)
-    |
-    v
-BasePluginClient._request("POST", f"plugin/{tenant_id}/invoke/tool", data={...})
-    |
-    v
-HTTP POST to Plugin Daemon (port 5002)
-    |
-    v
-Plugin Daemon routes to correct plugin instance
-    |
-    v
-Plugin executes tool function
-    |
-    v
-Response flows back through HTTP
+```mermaid
+graph TD
+    AppCode["Application Code"] --> InvokeTool["PluginToolManager.invoke_tool(\ntenant_id, provider_id,\ntool_name, params)"]
+    InvokeTool --> ClientReq["BasePluginClient._request(\nPOST, plugin/{tenant_id}/invoke/tool, data={...})"]
+    ClientReq --> HTTPPost["HTTP POST to Plugin Daemon\n(port 5002)"]
+    HTTPPost --> DaemonRoute["Plugin Daemon routes to\ncorrect plugin instance"]
+    DaemonRoute --> PluginExec["Plugin executes tool function"]
+    PluginExec --> Response["Response flows back\nthrough HTTP"]
 ```
 
 ## impl/ Adapter Layer
@@ -160,37 +142,20 @@ plugin-daemon:
 Plugins can call back into the Pulse API (e.g., to access storage, models,
 or database). This uses the `DIFY_INNER_API_URL` and `DIFY_INNER_API_KEY`:
 
-```
-Plugin Code (in daemon)
-    |
-    v
-HTTP to Pulse API (port 5001) with inner API key
-    |
-    v
-api/core/plugin/backwards_invocation/
-    Handles plugin callbacks for:
-    - Model invocation
-    - Storage access
-    - Tool chaining
-    - Knowledge retrieval
+```mermaid
+graph TD
+    PluginCode["Plugin Code (in daemon)"] --> HTTPtoPulse["HTTP to Pulse API\n(port 5001) with inner API key"]
+    HTTPtoPulse --> BackwardsInvocation["api/core/plugin/backwards_invocation/\nHandles plugin callbacks for:\n- Model invocation\n- Storage access\n- Tool chaining\n- Knowledge retrieval"]
 ```
 
 ## Multi-Tenant Plugin Resolution
 
 Plugins are scoped at two levels:
 
-```
-+------------------+     +------------------+
-| Global Plugins   |     | Tenant Plugins   |
-| (GLOBAL_TENANT)  |     | (per workspace)  |
-+------------------+     +------------------+
-         |                        |
-         +--------+------+-------+
-                  |
-         +--------v--------+
-         | Merged Provider  |
-         | List (deduped)   |
-         +-----------------+
+```mermaid
+graph TD
+    GlobalPlugins["Global Plugins\n(GLOBAL_TENANT)"] --> MergedList["Merged Provider List\n(deduped)"]
+    TenantPlugins["Tenant Plugins\n(per workspace)"] --> MergedList
 ```
 
 When fetching providers, the system:

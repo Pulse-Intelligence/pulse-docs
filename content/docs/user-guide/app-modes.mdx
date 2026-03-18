@@ -220,21 +220,16 @@ Use this table to quickly determine which mode to use:
 
 ### Flowchart
 
-```
-Start: What are you building?
-  |
-  +-- "A chatbot"
-  |     |
-  |     +-- Simple Q&A, one model        --> CHAT
-  |     +-- Multi-step with logic         --> ADVANCED CHAT
-  |     +-- AI picks its own tools        --> AGENT CHAT
-  |
-  +-- "An automation"
-  |     |
-  |     +-- Processes documents           --> RAG PIPELINE
-  |     +-- Anything else                 --> WORKFLOW
-  |
-  +-- "A one-shot generator"             --> COMPLETION
+```mermaid
+graph TD
+    Start{"What are you building?"} -->|A chatbot| ChatQ{"What kind of chatbot?"}
+    Start -->|An automation| AutoQ{"What kind of automation?"}
+    Start -->|A one-shot generator| Completion["COMPLETION"]
+    ChatQ -->|Simple Q&A, one model| Chat["CHAT"]
+    ChatQ -->|Multi-step with logic| AdvancedChat["ADVANCED CHAT"]
+    ChatQ -->|AI picks its own tools| AgentChat["AGENT CHAT"]
+    AutoQ -->|Processes documents| RAGPipeline["RAG PIPELINE"]
+    AutoQ -->|Anything else| Workflow["WORKFLOW"]
 ```
 
 ---

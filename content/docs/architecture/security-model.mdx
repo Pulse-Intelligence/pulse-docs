@@ -28,29 +28,32 @@ authorization, input validation, and plugin security.
 
 Pulse implements defense-in-depth with security controls at every layer:
 
-```
-+-- Network Layer ----------------------------------------+
-|  SSRF Proxy (Squid) blocks private network access       |
-|                                                          |
-|  +-- Application Layer --------------------------------+ |
-|  |  JWT auth, API keys, Flask-Login sessions           | |
-|  |                                                      | |
-|  |  +-- Authorization Layer --------------------------+ | |
-|  |  |  RBAC: owner > admin > editor > normal >        | | |
-|  |  |        dataset_operator                         | | |
-|  |  |                                                  | | |
-|  |  |  +-- Data Layer ------------------------------+ | | |
-|  |  |  |  Per-tenant RSA encryption for credentials | | | |
-|  |  |  |  Multi-tenant data isolation (tenant_id)   | | | |
-|  |  |  +--------------------------------------------+ | | |
-|  |  +--------------------------------------------------+ | |
-|  |                                                      | |
-|  |  +-- Execution Layer ------------------------------+ | |
-|  |  |  Sandbox (dify-sandbox) for user code           | | |
-|  |  |  Plugin signature verification                  | | |
-|  |  +--------------------------------------------------+ | |
-|  +------------------------------------------------------+ |
-+------------------------------------------------------------+
+```mermaid
+graph TD
+    subgraph NetworkLayer["Network Layer"]
+        direction TB
+        SSRF["SSRF Proxy (Squid)\nblocks private network access"]
+
+        subgraph AppLayer["Application Layer"]
+            direction TB
+            Auth["JWT auth, API keys,\nFlask-Login sessions"]
+
+            subgraph AuthzLayer["Authorization Layer"]
+                direction TB
+                RBAC["RBAC: owner > admin > editor >\nnormal > dataset_operator"]
+
+                subgraph DataLayer["Data Layer"]
+                    RSA["Per-tenant RSA encryption\nfor credentials"]
+                    Isolation["Multi-tenant data isolation\n(tenant_id)"]
+                end
+            end
+
+            subgraph ExecLayer["Execution Layer"]
+                Sandbox["Sandbox (dify-sandbox)\nfor user code"]
+                PluginSig["Plugin signature\nverification"]
+            end
+        end
+    end
 ```
 
 ---
@@ -70,22 +73,17 @@ network resources.
 Pulse routes outbound HTTP requests from user-defined nodes through a Squid
 proxy configured to block private networks:
 
-```
-User-defined HTTP Request
-     |
-     v
-SSRF Proxy (Squid)
-     |
-     +-- Blocked: 10.0.0.0/8     (RFC 1918 private)
-     +-- Blocked: 172.16.0.0/12  (RFC 1918 private)
-     +-- Blocked: 192.168.0.0/16 (RFC 1918 private)
-     +-- Blocked: 169.254.0.0/16 (link-local)
-     +-- Blocked: 127.0.0.0/8    (loopback)
-     +-- Blocked: ::1/128        (IPv6 loopback)
-     +-- Blocked: fc00::/7       (IPv6 private)
-     |
-     v
-Public internet (allowed)
+```mermaid
+graph TD
+    HTTPReq["User-defined HTTP Request"] --> SSRFProxy["SSRF Proxy (Squid)"]
+    SSRFProxy -->|Blocked| RFC1918a["10.0.0.0/8\n(RFC 1918 private)"]
+    SSRFProxy -->|Blocked| RFC1918b["172.16.0.0/12\n(RFC 1918 private)"]
+    SSRFProxy -->|Blocked| RFC1918c["192.168.0.0/16\n(RFC 1918 private)"]
+    SSRFProxy -->|Blocked| LinkLocal["169.254.0.0/16\n(link-local)"]
+    SSRFProxy -->|Blocked| Loopback["127.0.0.0/8\n(loopback)"]
+    SSRFProxy -->|Blocked| IPv6Loop["::1/128\n(IPv6 loopback)"]
+    SSRFProxy -->|Blocked| IPv6Priv["fc00::/7\n(IPv6 private)"]
+    SSRFProxy -->|Allowed| PublicInternet["Public internet"]
 ```
 
 ### Configuration
@@ -127,22 +125,21 @@ or system resources of the host.
 The sandbox (`dify-sandbox`) runs as a separate service with strict
 isolation:
 
-```
-+-- Host Machine --------------------------------+
-|                                                 |
-|  +-- Pulse API Container ----+                  |
-|  |  Code node execution      |                  |
-|  |  sends code to sandbox    |-----+            |
-|  +----------------------------+     |            |
-|                                     v            |
-|  +-- Sandbox Container ---------------------+   |
-|  |  - Separate process namespace             |   |
-|  |  - Restricted filesystem access           |   |
-|  |  - No network access                     |   |
-|  |  - Resource limits (CPU, memory, time)    |   |
-|  |  - Syscall filtering                      |   |
-|  +-------------------------------------------+   |
-+-------------------------------------------------+
+```mermaid
+graph TD
+    subgraph HostMachine["Host Machine"]
+        subgraph PulseContainer["Pulse API Container"]
+            CodeNode["Code node execution\nsends code to sandbox"]
+        end
+        subgraph SandboxContainer["Sandbox Container"]
+            SepNS["Separate process namespace"]
+            RestFS["Restricted filesystem access"]
+            NoNet["No network access"]
+            ResLimits["Resource limits (CPU, memory, time)"]
+            Syscall["Syscall filtering"]
+        end
+        CodeNode --> SandboxContainer
+    end
 ```
 
 ### Sandbox Restrictions
@@ -164,26 +161,12 @@ isolation:
 Each tenant (workspace) has its own RSA key pair for encrypting sensitive
 credentials like model provider API keys:
 
-```
-Tenant created
-     |
-     v
-Generate RSA key pair
-     |
-     v
-Store private key (encrypted) in database
-     |
-     v
-When saving API key:
-  1. Load tenant's RSA public key
-  2. Encrypt API key with RSA
-  3. Store encrypted value in database
-     |
-     v
-When using API key:
-  1. Load tenant's RSA private key
-  2. Decrypt API key
-  3. Pass to model provider (in memory only)
+```mermaid
+graph TD
+    TenantCreated["Tenant created"] --> GenRSA["Generate RSA key pair"]
+    GenRSA --> StorePrivKey["Store private key (encrypted)\nin database"]
+    StorePrivKey --> SaveAPIKey["When saving API key:\n1. Load tenant's RSA public key\n2. Encrypt API key with RSA\n3. Store encrypted value in database"]
+    SaveAPIKey --> UseAPIKey["When using API key:\n1. Load tenant's RSA private key\n2. Decrypt API key\n3. Pass to model provider (in memory only)"]
 ```
 
 ### What Gets Encrypted
@@ -215,23 +198,13 @@ Pulse supports multiple authentication mechanisms for different contexts:
 
 The web frontend authenticates using JWT tokens:
 
-```
-User logs in (email + password)
-     |
-     v
-Server validates credentials
-     |
-     v
-Server issues JWT (access + refresh tokens)
-     |
-     v
-Client stores tokens
-     |
-     v
-Subsequent requests include JWT in Authorization header
-     |
-     v
-Server validates JWT signature and expiration
+```mermaid
+graph TD
+    Login["User logs in\n(email + password)"] --> Validate["Server validates credentials"]
+    Validate --> IssueJWT["Server issues JWT\n(access + refresh tokens)"]
+    IssueJWT --> StoreTokens["Client stores tokens"]
+    StoreTokens --> SubsequentReq["Subsequent requests include\nJWT in Authorization header"]
+    SubsequentReq --> ValidateJWT["Server validates JWT\nsignature and expiration"]
 ```
 
 ### Flask-Login Sessions
@@ -246,20 +219,12 @@ Flask-Login manages server-side session state for the web UI:
 
 External integrations use API keys:
 
-```
-API request with header: Authorization: Bearer app-xxxxx
-     |
-     v
-Lookup API key in database
-     |
-     v
-Validate key is active and not expired
-     |
-     v
-Resolve associated app and tenant
-     |
-     v
-Process request with app's permissions
+```mermaid
+graph TD
+    APIReq["API request with header:\nAuthorization: Bearer app-xxxxx"] --> LookupKey["Lookup API key in database"]
+    LookupKey --> ValidateKey["Validate key is active\nand not expired"]
+    ValidateKey --> ResolveApp["Resolve associated\napp and tenant"]
+    ResolveApp --> ProcessReq["Process request with\napp's permissions"]
 ```
 
 ### Authentication Flow Comparison
@@ -309,20 +274,12 @@ Every database query that accesses tenant-scoped data must include a
 `tenant_id` filter. This is enforced at the service layer -- controllers
 extract `tenant_id` from the authenticated session and pass it through.
 
-```
-Request with JWT
-     |
-     v
-Extract user_id from JWT
-     |
-     v
-Lookup tenant_account_join for user_id
-     |
-     v
-Extract tenant_id and role
-     |
-     v
-Service layer uses tenant_id in all queries
+```mermaid
+graph TD
+    JWTReq["Request with JWT"] --> ExtractUser["Extract user_id from JWT"]
+    ExtractUser --> LookupJoin["Lookup tenant_account_join\nfor user_id"]
+    LookupJoin --> ExtractTenant["Extract tenant_id and role"]
+    ExtractTenant --> ServiceLayer["Service layer uses tenant_id\nin all queries"]
 ```
 
 ---
@@ -344,20 +301,12 @@ class CreateAppRequest(BaseModel):
 
 ### Validation Layers
 
-```
-Client Request
-     |
-     v
-[1] Flask route parameter validation
-     |
-     v
-[2] Pydantic model validation (types, constraints)
-     |
-     v
-[3] Business rule validation (service layer)
-     |
-     v
-[4] Database constraints (unique, foreign key, check)
+```mermaid
+graph TD
+    ClientReq["Client Request"] --> FlaskRoute["[1] Flask route\nparameter validation"]
+    FlaskRoute --> Pydantic["[2] Pydantic model validation\n(types, constraints)"]
+    Pydantic --> BusinessRule["[3] Business rule validation\n(service layer)"]
+    BusinessRule --> DBConstraints["[4] Database constraints\n(unique, foreign key, check)"]
 ```
 
 ### Common Validation Patterns
@@ -379,12 +328,10 @@ Client Request
 The plugin daemon runs as a separate Go service, providing language-level
 isolation from the Python API:
 
-```
-+-- Pulse API (Python) ----+     +-- Plugin Daemon (Go) ----+
-|  Sends plugin requests   |---->|  Executes plugins         |
-|  via HTTP/gRPC           |     |  in isolated environment  |
-|  Validates responses     |<----|  Returns results          |
-+---------------------------+     +---------------------------+
+```mermaid
+graph LR
+    PulseAPI["Pulse API (Python)\nSends plugin requests\nvia HTTP/gRPC\nValidates responses"] -->|requests| PluginDaemon["Plugin Daemon (Go)\nExecutes plugins\nin isolated environment\nReturns results"]
+    PluginDaemon -->|results| PulseAPI
 ```
 
 ### Signature Verification
@@ -410,22 +357,33 @@ enforces these permissions at runtime:
 
 ### Internal Network Architecture
 
-```
-+-- Public Network --+     +-- Internal Network ---------------------+
-|                    |     |                                          |
-|  Users / Clients   |---->|  Nginx/Load Balancer                    |
-|                    |     |     |                                    |
-+--------------------+     |     +-->  Flask API                     |
-                           |     |       |                            |
-                           |     |       +-->  PostgreSQL (port 5432) |
-                           |     |       +-->  Redis (port 6379)      |
-                           |     |       +-->  Weaviate (port 8080)   |
-                           |     |       +-->  Plugin Daemon          |
-                           |     |       +-->  Sandbox                |
-                           |     |                                    |
-                           |     +-->  Celery Workers                |
-                           |     +-->  SSRF Proxy                    |
-                           +------------------------------------------+
+```mermaid
+graph LR
+    subgraph PublicNetwork["Public Network"]
+        Users["Users / Clients"]
+    end
+
+    subgraph InternalNetwork["Internal Network"]
+        LB["Nginx / Load Balancer"]
+        FlaskAPI["Flask API"]
+        PostgreSQL["PostgreSQL\n:5432"]
+        Redis["Redis\n:6379"]
+        Weaviate["Weaviate\n:8080"]
+        PluginDaemon["Plugin Daemon"]
+        Sandbox["Sandbox"]
+        CeleryWorkers["Celery Workers"]
+        SSRFProxy["SSRF Proxy"]
+    end
+
+    Users --> LB
+    LB --> FlaskAPI
+    LB --> CeleryWorkers
+    LB --> SSRFProxy
+    FlaskAPI --> PostgreSQL
+    FlaskAPI --> Redis
+    FlaskAPI --> Weaviate
+    FlaskAPI --> PluginDaemon
+    FlaskAPI --> Sandbox
 ```
 
 ### Port Exposure

@@ -58,13 +58,15 @@ We are going to build a smart routing workflow that:
 
 Here is what the finished workflow looks like:
 
-```
-[Start] --> [LLM: Classify] --> [IF/ELSE] --> [LLM: Respond] --> [Answer]
-  |              |                  |                |                |
-  query     classification      "support"?       response          output
-              result            |-- Yes --> [Knowledge Retrieval] --> [LLM: Support]
-                                |                                       |
-                                '-- No  --> [LLM: General] ----------> [Answer]
+```mermaid
+graph TD
+    Start["Start\n(user query)"] --> Classify["LLM: Classify\n(classification result)"]
+    Classify --> IfElse{"IF/ELSE\nIs it support?"}
+    IfElse -->|Yes| KnowledgeRetrieval["Knowledge Retrieval"]
+    KnowledgeRetrieval --> SupportLLM["LLM: Support Answer"]
+    SupportLLM --> SupportAnswer["Answer"]
+    IfElse -->|No| GeneralLLM["LLM: General Answer"]
+    GeneralLLM --> GeneralAnswer["Answer"]
 ```
 
 Do not worry if this looks complex -- we will build it one step at a
@@ -257,14 +259,15 @@ to the user.
 
 Your completed workflow should look like this:
 
-```
-                                 +-- IF (support) ---+
-                                 |                    |
-[Start] --> [LLM: Classify] --> [IF/ELSE]           [Knowledge] --> [LLM: Support] --> [Answer]
-                                 |                    
-                                 +-- ELSE (general) -+
-                                                      |
-                                            [LLM: General] --> [Answer]
+```mermaid
+graph TD
+    Start["Start"] --> Classify["LLM: Classify"]
+    Classify --> IfElse{"IF/ELSE"}
+    IfElse -->|"IF (support)"| Knowledge["Knowledge Retrieval"]
+    Knowledge --> SupportLLM["LLM: Support"]
+    SupportLLM --> SupportAnswer["Answer"]
+    IfElse -->|"ELSE (general)"| GeneralLLM["LLM: General"]
+    GeneralLLM --> GeneralAnswer["Answer"]
 ```
 
 ---

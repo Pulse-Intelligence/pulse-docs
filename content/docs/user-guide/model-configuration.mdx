@@ -45,6 +45,15 @@ different models for different purposes.
 
 ## Adding a Model Provider
 
+```mermaid
+graph LR
+    GetKey["Get API Key\nfrom provider"] --> OpenSettings["Open Settings\nin Pulse"]
+    OpenSettings --> SelectProvider["Select Provider"]
+    SelectProvider --> PasteKey["Paste API Key"]
+    PasteKey --> Verify["Pulse Verifies\nConnection"]
+    Verify --> Ready["Models Available"]
+```
+
 ### Step-by-Step
 
 1. Go to **"Settings"** in the sidebar.

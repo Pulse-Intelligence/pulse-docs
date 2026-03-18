@@ -28,37 +28,24 @@ This lack of structure led to:
 Adopt a **Domain-Driven Design (DDD) layered architecture** with strict
 import rules between layers:
 
-```
-+-------------------+
-|   Controllers     |  (api/controllers/)
-|   - HTTP routing  |
-|   - Request/      |
-|     Response DTOs |
-+--------+----------+
-         |  calls
-         v
-+-------------------+
-|   Services        |  (api/services/)
-|   - Business      |
-|     logic         |
-|   - Orchestration |
-+--------+----------+
-         |  calls
-         v
-+-------------------+
-|   Core / Domain   |  (api/core/)
-|   - Domain models |
-|   - Domain logic  |
-|   - Repositories  |
-+--------+----------+
-         |  accesses
-         v
-+-------------------+
-|   Extensions      |  (api/extensions/)
-|   - Database      |
-|   - Redis         |
-|   - Storage       |
-+-------------------+
+```mermaid
+graph TD
+    subgraph ControllersLayer["Controllers (api/controllers/)"]
+        ControllersContent["HTTP routing\nRequest/Response DTOs"]
+    end
+    subgraph ServicesLayer["Services (api/services/)"]
+        ServicesContent["Business logic\nOrchestration"]
+    end
+    subgraph CoreLayer["Core / Domain (api/core/)"]
+        CoreContent["Domain models\nDomain logic\nRepositories"]
+    end
+    subgraph ExtensionsLayer["Extensions (api/extensions/)"]
+        ExtensionsContent["Database\nRedis\nStorage"]
+    end
+
+    ControllersLayer -->|calls| ServicesLayer
+    ServicesLayer -->|calls| CoreLayer
+    CoreLayer -->|accesses| ExtensionsLayer
 ```
 
 ### Import Rules

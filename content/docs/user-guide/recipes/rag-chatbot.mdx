@@ -33,6 +33,17 @@ Before starting, you need:
 
 ---
 
+## Overview
+
+```mermaid
+graph LR
+    CreateKB["Create Knowledge Base"] --> Upload["Upload Documents"]
+    Upload --> TestKB["Test Knowledge Base"]
+    TestKB --> CreateApp["Create Chatbot App"]
+    CreateApp --> ConnectKB["Connect Knowledge Base"]
+    ConnectKB --> Publish["Publish"]
+```
+
 ## Steps
 
 ### Step 1: Create a Knowledge Base

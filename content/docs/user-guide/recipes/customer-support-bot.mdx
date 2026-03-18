@@ -30,6 +30,21 @@ By the end of this recipe, you will have a support chatbot that:
 
 ---
 
+## Overview
+
+```mermaid
+graph TD
+    Start["User Message"] --> Classify["Route Question"]
+    Classify -->|Billing| BillingKB["Search Billing Docs"]
+    BillingKB --> BillingLLM["Billing Response"]
+    Classify -->|Technical| TechKB["Search Tech Docs"]
+    TechKB --> TechLLM["Technical Response"]
+    Classify -->|General| GeneralLLM["General Response"]
+    BillingLLM --> Answer1["Answer"]
+    TechLLM --> Answer2["Answer"]
+    GeneralLLM --> Answer3["Answer"]
+```
+
 ## Steps
 
 ### Step 1: Create the App

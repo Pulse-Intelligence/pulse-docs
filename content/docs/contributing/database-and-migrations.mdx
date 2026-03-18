@@ -105,6 +105,14 @@ class DataTransformConfig(DefaultFieldsMixin, TypeBase):
 
 ## Creating Migrations
 
+```mermaid
+graph TD
+    ModifyModel["Modify Model"] --> GenerateMigration["Generate Migration"]
+    GenerateMigration --> ReviewSQL["Review SQL"]
+    ReviewSQL --> RunMigration["Run Migration"]
+    RunMigration --> VerifySchema["Verify Schema"]
+```
+
 ### Generate a Migration
 
 After modifying or creating models:

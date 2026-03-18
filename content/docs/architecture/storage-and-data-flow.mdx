@@ -26,19 +26,14 @@ that threads data through workflow executions.
 Pulse uses five complementary storage systems, each optimized for a different
 access pattern:
 
-```
-+------------------+     +------------------+     +------------------+
-|   PostgreSQL 16  |     |    Redis 7       |     |   Vector Store   |
-|  (relational)    |     |  (cache / queue) |     | (Weaviate, etc.) |
-+--------+---------+     +--------+---------+     +--------+---------+
-         |                        |                        |
-         +----------+-------------+----------+-------------+
-                    |                        |
-           +-------v--------+      +--------v---------+
-           |  Blob Storage  |      |  Variable Pool   |
-           | (S3, local...) |      | (in-memory, per  |
-           +----------------+      |  workflow run)    |
-                                   +------------------+
+```mermaid
+graph TD
+    PostgreSQL["PostgreSQL 16\n(relational)"] --> BlobStorage["Blob Storage\n(S3, local...)"]
+    PostgreSQL --> VarPool["Variable Pool\n(in-memory, per workflow run)"]
+    Redis["Redis 7\n(cache / queue)"] --> BlobStorage
+    Redis --> VarPool
+    VectorStore["Vector Store\n(Weaviate, etc.)"] --> BlobStorage
+    VectorStore --> VarPool
 ```
 
 | Layer         | Technology                | Purpose                                    |
@@ -83,20 +78,12 @@ overflow). The pool is configured with:
 Sessions are managed through Flask's application context and scoped to the
 current thread/greenlet:
 
-```
-Request arrives
-  |
-  v
-Flask creates app context
-  |
-  v
-db.session (scoped) -- bound to this thread
-  |
-  v
-ORM operations happen
-  |
-  v
-Request completes -- session is removed (returned to pool)
+```mermaid
+graph TD
+    RequestArrives["Request arrives"] --> FlaskContext["Flask creates app context"]
+    FlaskContext --> DBSession["db.session (scoped)\nbound to this thread"]
+    DBSession --> ORMOps["ORM operations happen"]
+    ORMOps --> RequestComplete["Request completes\nsession is removed (returned to pool)"]
 ```
 
 **Context manager pattern for background tasks** (e.g., Celery workers):
@@ -115,14 +102,14 @@ Pulse is multi-tenant: every significant model includes a `tenant_id` column.
 Queries must always scope by tenant to prevent data leakage between
 workspaces:
 
-```
-+-----------+     +----------+     +-------+     +----------+
-|  Account  |---->|  Tenant  |---->|  App  |---->| Workflow |
-+-----------+     +----------+     +-------+     +----------+
-                       |
-                       +---->  Dataset
-                       +---->  ApiToken
-                       +---->  ModelProvider
+```mermaid
+graph LR
+    Account --> Tenant
+    Tenant --> App
+    App --> Workflow
+    Tenant --> Dataset
+    Tenant --> ApiToken
+    Tenant --> ModelProvider
 ```
 
 ### Key Tables
@@ -180,11 +167,10 @@ Type:            Sorted set (sliding window) or counter
 Chat and workflow streaming use Redis pub/sub to push incremental results
 from Celery workers to the API process serving the SSE connection:
 
-```
-+----------+       Redis Pub/Sub        +-----------+
-|  Celery  | ----publish tokens-------> |  Flask    |
-|  Worker  |   channel: stream:<run_id> |  API SSE  |
-+----------+                            +-----------+
+```mermaid
+graph LR
+    CeleryWorker["Celery Worker"] -->|"publish tokens\nchannel: stream:{run_id}"| RedisPubSub["Redis Pub/Sub"]
+    RedisPubSub --> FlaskSSE["Flask API SSE"]
 ```
 
 ### Command Channels
@@ -229,46 +215,25 @@ VECTOR_STORE=pgvector  -->  PGVectorStore
 
 ### Document Indexing Flow
 
-```
-Upload Document
-     |
-     v
-Extract Text  (DocumentExtractor node or service)
-     |
-     v
-Chunk Text     (configurable chunk size / overlap)
-     |
-     v
-Embed Chunks   (model provider API call)
-     |
-     v
-Store Vectors  (vector store backend)
-     |
-     v
-Store Metadata (PostgreSQL document_segments table)
+```mermaid
+graph TD
+    Upload["Upload Document"] --> ExtractText["Extract Text\n(DocumentExtractor node or service)"]
+    ExtractText --> ChunkText["Chunk Text\n(configurable chunk size / overlap)"]
+    ChunkText --> EmbedChunks["Embed Chunks\n(model provider API call)"]
+    EmbedChunks --> StoreVectors["Store Vectors\n(vector store backend)"]
+    StoreVectors --> StoreMeta["Store Metadata\n(PostgreSQL document_segments table)"]
 ```
 
 ### Retrieval Flow
 
-```
-User Query
-     |
-     v
-Embed Query              (same embedding model)
-     |
-     v
-Vector Search            (semantic similarity)
-     |                          |
-     v                          v
-Keyword Search           (optional, for hybrid)
-     |                          |
-     +---------+----------------+
-               |
-               v
-         Rerank Results   (optional reranking model)
-               |
-               v
-         Return Top-K     (merged and deduplicated)
+```mermaid
+graph TD
+    UserQuery["User Query"] --> EmbedQuery["Embed Query\n(same embedding model)"]
+    EmbedQuery --> VectorSearch["Vector Search\n(semantic similarity)"]
+    EmbedQuery --> KeywordSearch["Keyword Search\n(optional, for hybrid)"]
+    VectorSearch --> RerankResults["Rerank Results\n(optional reranking model)"]
+    KeywordSearch --> RerankResults
+    RerankResults --> ReturnTopK["Return Top-K\n(merged and deduplicated)"]
 ```
 
 ### Hybrid Retrieval Parallelization
@@ -300,15 +265,15 @@ cost.
 The `Storage` class in `api/extensions/ext_storage.py` provides a unified
 interface over multiple blob storage backends:
 
-```
-                    +----------+
-                    | Storage  |  (ext_storage.py)
-                    +----+-----+
-                         |
-         +-------+-------+-------+-------+-------+
-         |       |       |       |       |       |
-       Local   S3    Azure   GCS    OSS   OCI  ...
-       (fs)         Blob        Cloud
+```mermaid
+graph TD
+    Storage["Storage (ext_storage.py)"] --> Local["Local (fs)"]
+    Storage --> S3["S3"]
+    Storage --> Azure["Azure Blob"]
+    Storage --> GCS["GCS"]
+    Storage --> OSS["OSS"]
+    Storage --> OCI["OCI"]
+    Storage --> More["..."]
 ```
 
 ### Supported Backends
@@ -360,12 +325,10 @@ variable_dictionary: defaultdict[str, dict[str, Variable]]
 
 Variables are addressed using selectors -- tuples of `(node_id, key)`:
 
-```
-Selector: ("node_abc123", "output_text")
-          +-----------+   +----------+
-          | namespace |   | variable |
-          | (node ID) |   |   name   |
-          +-----------+   +----------+
+```mermaid
+graph LR
+    Selector["Selector: (node_abc123, output_text)"] --> Namespace["namespace\n(node ID)"]
+    Selector --> VarName["variable\nname"]
 ```
 
 When a node declares an input variable reference like
@@ -453,26 +416,13 @@ dicts) to prevent accidental mutation.
 
 ### Variable Lifecycle
 
-```
-1. Workflow run starts
-   |
-   v
-2. VariablePool is created with system, environment, and conversation variables
-   |
-   v
-3. Start node writes user inputs to the pool
-   |
-   v
-4. Each node:
-   a. Reads inputs by resolving selectors against the pool
-   b. Executes its logic
-   c. Writes outputs back to the pool under its own node_id
-   |
-   v
-5. End/Answer node reads final outputs from the pool
-   |
-   v
-6. Workflow run completes -- VariablePool is garbage collected
+```mermaid
+graph TD
+    Step1["1. Workflow run starts"] --> Step2["2. VariablePool is created with\nsystem, environment, and\nconversation variables"]
+    Step2 --> Step3["3. Start node writes\nuser inputs to the pool"]
+    Step3 --> Step4["4. Each node:\na. Reads inputs by resolving selectors\nb. Executes its logic\nc. Writes outputs under its own node_id"]
+    Step4 --> Step5["5. End/Answer node reads\nfinal outputs from the pool"]
+    Step5 --> Step6["6. Workflow run completes\nVariablePool is garbage collected"]
 ```
 
 ---
@@ -481,32 +431,16 @@ dicts) to prevent accidental mutation.
 
 A typical chatbot request touches multiple storage layers:
 
-```
-User sends message
-     |
-     v
-[1] PostgreSQL: Load app config, model settings
-     |
-     v
-[2] Redis: Check rate limits, load cached model schema
-     |
-     v
-[3] Variable Pool: Initialize with system vars, env vars, conversation vars
-     |
-     v
-[4] Vector Store: Knowledge retrieval (if RAG is configured)
-     |
-     v
-[5] Blob Storage: Fetch any referenced files
-     |
-     v
-[6] Variable Pool: Pass data between nodes
-     |
-     v
-[7] Redis Pub/Sub: Stream LLM tokens back to the API
-     |
-     v
-[8] PostgreSQL: Persist workflow_run and node_execution records
+```mermaid
+graph TD
+    Msg["User sends message"] --> PG1["[1] PostgreSQL:\nLoad app config, model settings"]
+    PG1 --> Redis1["[2] Redis:\nCheck rate limits, load cached model schema"]
+    Redis1 --> VP1["[3] Variable Pool:\nInitialize with system vars,\nenv vars, conversation vars"]
+    VP1 --> VS["[4] Vector Store:\nKnowledge retrieval (if RAG configured)"]
+    VS --> Blob["[5] Blob Storage:\nFetch any referenced files"]
+    Blob --> VP2["[6] Variable Pool:\nPass data between nodes"]
+    VP2 --> PubSub["[7] Redis Pub/Sub:\nStream LLM tokens back to the API"]
+    PubSub --> PG2["[8] PostgreSQL:\nPersist workflow_run and\nnode_execution records"]
 ```
 
 ---

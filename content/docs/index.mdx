@@ -13,21 +13,15 @@ The documentation is organized into four tiers, each aimed at a different
 audience and level of depth. Start with whichever tier matches your current
 need and follow the cross-references to go deeper.
 
-```
-+---------------------+
-|   Tier 1: Overview   |
-|  (this directory)    |
-+----------+----------+
-           |
-+----------v----------+     +---------------------+
-| Tier 2: Contributing |     | Tier 4: User Guide  |
-|  (contributing/)     |     |  (user-guide/)      |
-+----------+----------+     | Non-technical users  |
-           |                 +---------------------+
-+----------v----------+
-| Tier 3: Architecture |
-|  (architecture/)     |
-+---------------------+
+```mermaid
+graph TD
+    Overview["Tier 1: Overview\n(this directory)"] --> Contributing["Tier 2: Contributing\n(contributing/)"]
+    Overview --> UserGuide["Tier 4: User Guide\n(user-guide/)\nNon-technical users"]
+    Contributing --> Architecture["Tier 3: Architecture\n(architecture/)"]
+    click Overview "/docs" "Overview"
+    click Contributing "/docs/contributing" "Contributing"
+    click Architecture "/docs/architecture" "Architecture"
+    click UserGuide "/docs/user-guide" "User Guide"
 ```
 
 ## Tier 1 -- Project Overview
@@ -139,7 +133,7 @@ Every document follows these conventions:
 3. **No secrets** -- Placeholder values like `YOUR_API_KEY` are used instead of
    real credentials.
 4. **Cross-references** -- Documents link to each other with relative paths.
-5. **ASCII diagrams** -- Non-trivial flows are illustrated with ASCII art.
+5. **Mermaid diagrams** -- Non-trivial flows are illustrated with Mermaid diagrams.
 6. **Code examples** -- Drawn from the actual codebase, not hypothetical.
 
 ## Repository Layout at a Glance

@@ -118,32 +118,13 @@ api/
 
 ### Backend Layer Diagram
 
-```
-  HTTP Request
-      |
-      v
-  +------------------+
-  |   Controllers    |   Parse input, call services, return JSON
-  |   (controllers/) |   No business logic allowed here
-  +--------+---------+
-           |
-           v
-  +------------------+
-  |    Services      |   Business logic, tenant scoping, quotas
-  |   (services/)    |   Coordinate core + repos + tasks
-  +--------+---------+
-           |
-           v
-  +------------------+
-  |      Core        |   Domain logic, engines, algorithms
-  |    (core/)       |   Workflow engine, RAG, model runtime
-  +--------+---------+
-           |
-           v
-  +------------------+
-  |  Models / Repos  |   Database access, ORM definitions
-  | (models/, repos/)|   SQLAlchemy, always filtered by tenant_id
-  +------------------+
+```mermaid
+graph TD
+    Request["HTTP Request"] --> Controllers
+    Controllers["Controllers (controllers/)\nParse input, call services, return JSON\nNo business logic allowed here"] --> Services
+    Services["Services (services/)\nBusiness logic, tenant scoping, quotas\nCoordinate core + repos + tasks"] --> Core
+    Core["Core (core/)\nDomain logic, engines, algorithms\nWorkflow engine, RAG, model runtime"] --> ModelsRepos
+    ModelsRepos["Models / Repos (models/, repos/)\nDatabase access, ORM definitions\nSQLAlchemy, always filtered by tenant_id"]
 ```
 
 ### Extension Initialization Order
@@ -244,21 +225,10 @@ web/
 
 ### State Management Strategy
 
-```
-  +-------------------+
-  |    Zustand        |   Global state (user session, workspace)
-  |    (stores)       |   Shared across the entire app
-  +-------------------+
-
-  +-------------------+
-  |    Jotai          |   Atomic state (UI toggles, local prefs)
-  |    (atoms)        |   Fine-grained reactivity
-  +-------------------+
-
-  +-------------------+
-  |  TanStack Query   |   Server state (API data, caching)
-  |    (queries)      |   Fetch, cache, sync with backend
-  +-------------------+
+```mermaid
+graph LR
+    Zustand["Zustand (stores)\nGlobal state\nUser session, workspace"] ~~~ Jotai["Jotai (atoms)\nAtomic state\nUI toggles, local prefs"]
+    Jotai ~~~ TanStack["TanStack Query (queries)\nServer state\nFetch, cache, sync with backend"]
 ```
 
 ## Docker: `docker/`

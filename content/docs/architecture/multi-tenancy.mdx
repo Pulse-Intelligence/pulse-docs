@@ -11,17 +11,36 @@ in the UI) provide complete data isolation while sharing infrastructure.
 
 ### Core Tables
 
-```
-+------------------+        +------------------------+        +------------------+
-|    accounts      |        | tenant_account_joins   |        |     tenants      |
-+------------------+        +------------------------+        +------------------+
-| id (PK)          |<------>| account_id (FK)        |------->| id (PK)          |
-| name             |        | tenant_id (FK)         |        | name             |
-| email            |        | role                   |        | encrypt_public_key|
-| password         |        | current                |        | plan             |
-| status           |        | invited_by             |        | status           |
-| ...              |        | created_at             |        | custom_config    |
-+------------------+        +------------------------+        +------------------+
+```mermaid
+erDiagram
+    accounts ||--o{ tenant_account_joins : has
+    tenants ||--o{ tenant_account_joins : has
+
+    accounts {
+        string id PK
+        string name
+        string email
+        string password
+        string status
+    }
+
+    tenant_account_joins {
+        string account_id FK
+        string tenant_id FK
+        string role
+        boolean current
+        string invited_by
+        datetime created_at
+    }
+
+    tenants {
+        string id PK
+        string name
+        string encrypt_public_key
+        string plan
+        string status
+        string custom_config
+    }
 ```
 
 ### Tenant SQLAlchemy Model
@@ -61,27 +80,12 @@ class TenantAccountJoin(TypeBase):
 
 ## Role Hierarchy
 
-```
-+-------------------+
-|      owner        |  Full control. One per tenant.
-+-------------------+
-         |
-+-------------------+
-|      admin        |  Manage members, settings, all resources
-+-------------------+
-         |
-+-------------------+
-|      editor       |  Create/edit apps, workflows, datasets
-+-------------------+
-         |
-+---+----------+----+
-|               |
-v               v
-+---------+  +------------------+
-| normal  |  | dataset_operator |
-| (view   |  | (manage datasets |
-|  only)  |  |  only)           |
-+---------+  +------------------+
+```mermaid
+graph TD
+    Owner["owner\nFull control. One per tenant."] --> Admin["admin\nManage members, settings, all resources"]
+    Admin --> Editor["editor\nCreate/edit apps, workflows, datasets"]
+    Editor --> Normal["normal\n(view only)"]
+    Editor --> DatasetOp["dataset_operator\n(manage datasets only)"]
 ```
 
 ### Role Permission Matrix
@@ -179,23 +183,13 @@ class AppResource(Resource):
 
 ### Decorator Chain
 
-```
-Request arrives
-    |
-    v
-@login_required           # Verify JWT token, load Account
-    |
-    v
-@account_initialization   # Ensure account is fully set up
-    |
-    v
-@setup_required           # Ensure system is initialized
-    |
-    v
-Controller method
-    |
-    v
-current_user.current_tenant_id  # Tenant ID available
+```mermaid
+graph TD
+    Request["Request arrives"] --> LoginReq["@login_required\nVerify JWT token, load Account"]
+    LoginReq --> AcctInit["@account_initialization\nEnsure account is fully set up"]
+    AcctInit --> SetupReq["@setup_required\nEnsure system is initialized"]
+    SetupReq --> Controller["Controller method"]
+    Controller --> TenantID["current_user.current_tenant_id\nTenant ID available"]
 ```
 
 ## Per-Tenant Encryption
@@ -203,71 +197,28 @@ current_user.current_tenant_id  # Tenant ID available
 Each tenant has an RSA key pair for encrypting sensitive data (API keys,
 model credentials):
 
-```
-+------------------+
-|     Tenant       |
-|                  |
-| encrypt_public_  |  RSA public key (stored in DB)
-| key              |
-+------------------+
-         |
-         v
-+------------------+
-| encrypter module |  api/core/helper/encrypter.py
-|                  |
-| encrypt()        |  Public key encrypts credentials
-| decrypt()        |  Private key (derived from system secret) decrypts
-+------------------+
+```mermaid
+graph TD
+    Tenant["Tenant\nencrypt_public_key\n(RSA public key stored in DB)"] --> Encrypter["encrypter module\napi/core/helper/encrypter.py\n\nencrypt() - Public key encrypts credentials\ndecrypt() - Private key (derived from system secret) decrypts"]
 ```
 
 ### Encryption Flow
 
-```
-User submits API key
-    |
-    v
-+------------------+
-| Validate schema  |  Check credential format
-+------------------+
-    |
-    v
-+------------------+
-| Encrypt with     |  tenant.encrypt_public_key
-| tenant's RSA key |
-+------------------+
-    |
-    v
-+------------------+
-| Store encrypted  |  ProviderCredential table
-| in database      |  ProviderModelCredential table
-+------------------+
+```mermaid
+graph TD
+    SubmitKey["User submits API key"] --> ValidateSchema["Validate schema\nCheck credential format"]
+    ValidateSchema --> EncryptRSA["Encrypt with tenant's RSA key\ntenant.encrypt_public_key"]
+    EncryptRSA --> StoreDB["Store encrypted in database\nProviderCredential table\nProviderModelCredential table"]
 ```
 
 ### Decryption Flow
 
-```
-Need credentials
-    |
-    v
-+------------------+
-| Load encrypted   |  From ProviderCredential
-| from database    |
-+------------------+
-    |
-    v
-+------------------+
-| Decrypt with     |  Private key derived from
-| derived key      |  system SECRET_KEY + tenant_id
-+------------------+
-    |
-    v
-+------------------+
-| Cache in Redis   |  provider_credentials:{tenant}:{provider}
-| (optional)       |
-+------------------+
-    |
-    v
-Use plaintext credentials
+```mermaid
+graph TD
+    NeedCreds["Need credentials"] --> LoadEncrypted["Load encrypted from database\nFrom ProviderCredential"]
+    LoadEncrypted --> Decrypt["Decrypt with derived key\nPrivate key derived from\nsystem SECRET_KEY + tenant_id"]
+    Decrypt --> CacheRedis["Cache in Redis (optional)\nprovider_credentials:{tenant}:{provider}"]
+    CacheRedis --> UsePlaintext["Use plaintext credentials"]
 ```
 
 ## Redis Namespacing

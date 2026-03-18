@@ -25,20 +25,15 @@ class AppMode(StrEnum):
 
 ### Mode Characteristics
 
-```
-+------------------+----------+---------+----------+----------+
-| Mode             | Workflow | Memory  | Streaming| Multi-   |
-|                  | Engine   |         |          | turn     |
-+------------------+----------+---------+----------+----------+
-| COMPLETION       |    No    |   No    |   Yes    |   No     |
-| CHAT             |    No    |   Yes   |   Yes    |   Yes    |
-| WORKFLOW         |   Yes    |   No    |   Yes    |   No     |
-| ADVANCED_CHAT    |   Yes    |   Yes   |   Yes    |   Yes    |
-| AGENT_CHAT       |    No    |   Yes   |   Yes    |   Yes    |
-| CHANNEL          |   Yes    |   Yes   |   Yes    |   Yes    |
-| RAG_PIPELINE     |   Yes    |   No    |   Yes    |   No     |
-+------------------+----------+---------+----------+----------+
-```
+| Mode | Workflow Engine | Memory | Streaming | Multi-turn |
+| ---- | -------------- | ------ | --------- | ---------- |
+| COMPLETION | No | No | Yes | No |
+| CHAT | No | Yes | Yes | Yes |
+| WORKFLOW | Yes | No | Yes | No |
+| ADVANCED_CHAT | Yes | Yes | Yes | Yes |
+| AGENT_CHAT | No | Yes | Yes | Yes |
+| CHANNEL | Yes | Yes | Yes | Yes |
+| RAG_PIPELINE | Yes | No | Yes | No |
 
 ## Per-Mode Components
 
@@ -141,88 +136,59 @@ class WorkflowBasedAppRunner:
 
 ### Workflow Mode
 
-```
-Controller (POST /workflows/run)
-    |
-    v
-WorkflowAppGenerator.generate()
-    |
-    +-- 1. Load Workflow from DB
-    +-- 2. Validate app config (WorkflowAppConfigManager)
-    +-- 3. Prepare user inputs (_prepare_user_inputs)
-    +-- 4. Create WorkflowAppGenerateEntity
-    +-- 5. Spawn background thread:
-    |       |
-    |       v
-    |   WorkflowAppRunner.run()
-    |       |
-    |       +-- Build Graph from workflow config
-    |       +-- Create VariablePool with inputs + system vars
-    |       +-- Create GraphRuntimeState
-    |       +-- Attach layers (ExecutionLimits, Observability, ...)
-    |       +-- Create WorkflowEntry
-    |       +-- Execute GraphEngine.run()
-    |       +-- Convert GraphEngineEvents -> QueueEvents
-    |       +-- Push events to AppQueueManager
-    |
-    +-- 6. Return WorkflowAppGenerateTaskPipeline
-            |
-            v
-        Stream QueueEvents -> SSE Response
+```mermaid
+graph TD
+    Controller["Controller\n(POST /workflows/run)"] --> Generator["WorkflowAppGenerator.generate()"]
+    Generator --> Load["1. Load Workflow from DB"]
+    Generator --> Validate["2. Validate app config\n(WorkflowAppConfigManager)"]
+    Generator --> Prepare["3. Prepare user inputs\n(_prepare_user_inputs)"]
+    Generator --> CreateEntity["4. Create WorkflowAppGenerateEntity"]
+    Generator --> Spawn["5. Spawn background thread"]
+    Spawn --> Runner["WorkflowAppRunner.run()"]
+    Runner --> BuildGraph["Build Graph from workflow config"]
+    Runner --> CreatePool["Create VariablePool with inputs + system vars"]
+    Runner --> CreateState["Create GraphRuntimeState"]
+    Runner --> AttachLayers["Attach layers (ExecutionLimits, Observability, ...)"]
+    Runner --> CreateEntry["Create WorkflowEntry"]
+    Runner --> Execute["Execute GraphEngine.run()"]
+    Runner --> ConvertEvents["Convert GraphEngineEvents -> QueueEvents"]
+    Runner --> PushEvents["Push events to AppQueueManager"]
+    Generator --> ReturnPipeline["6. Return WorkflowAppGenerateTaskPipeline"]
+    ReturnPipeline --> StreamSSE["Stream QueueEvents -> SSE Response"]
 ```
 
 ### Advanced Chat Mode
 
-```
-Controller (POST /chat-messages)
-    |
-    v
-AdvancedChatAppGenerator.generate()
-    |
-    +-- 1. Load Workflow from DB
-    +-- 2. Load or create Conversation
-    +-- 3. Create Message record
-    +-- 4. Load conversation history (memory)
-    +-- 5. Prepare user inputs
-    +-- 6. Create AdvancedChatAppGenerateEntity
-    +-- 7. Spawn background thread:
-    |       |
-    |       v
-    |   AdvancedChatAppRunner.run()
-    |       |
-    |       +-- Same as WorkflowAppRunner but with:
-    |       +-- Conversation variables loaded
-    |       +-- dialogue_count set
-    |       +-- Message updated with outputs
-    |
-    +-- 8. Return AdvancedChatAppGenerateTaskPipeline
-            |
-            v
-        Stream QueueEvents -> SSE Response
+```mermaid
+graph TD
+    ChatController["Controller\n(POST /chat-messages)"] --> ChatGenerator["AdvancedChatAppGenerator.generate()"]
+    ChatGenerator --> LoadWF["1. Load Workflow from DB"]
+    ChatGenerator --> LoadConv["2. Load or create Conversation"]
+    ChatGenerator --> CreateMsg["3. Create Message record"]
+    ChatGenerator --> LoadHistory["4. Load conversation history (memory)"]
+    ChatGenerator --> PrepInputs["5. Prepare user inputs"]
+    ChatGenerator --> CreateChatEntity["6. Create AdvancedChatAppGenerateEntity"]
+    ChatGenerator --> SpawnChat["7. Spawn background thread"]
+    SpawnChat --> ChatRunner["AdvancedChatAppRunner.run()"]
+    ChatRunner --> SameAsWF["Same as WorkflowAppRunner but with:\n- Conversation variables loaded\n- dialogue_count set\n- Message updated with outputs"]
+    ChatGenerator --> ReturnChatPipeline["8. Return AdvancedChatAppGenerateTaskPipeline"]
+    ReturnChatPipeline --> ChatStreamSSE["Stream QueueEvents -> SSE Response"]
 ```
 
 ### RAG Pipeline Mode
 
-```
-Controller or Celery Task
-    |
-    v
-PipelineGenerator.generate()
-    |
-    +-- 1. Load Pipeline + Workflow
-    +-- 2. Prepare document metadata as system variables
-    |      (document_id, dataset_id, datasource_type, batch, ...)
-    +-- 3. Create RagPipelineGenerateEntity
-    +-- 4. Spawn background thread:
-    |       |
-    |       v
-    |   PipelineRunner.run()
-    |       |
-    |       +-- Similar to WorkflowAppRunner
-    |       +-- DATASOURCE node as root instead of START
-    |       +-- RAG-specific system variables
-    |
-    +-- Return task pipeline or result
+```mermaid
+graph TD
+    PipelineCtrl["Controller or Celery Task"] --> PipelineGen["PipelineGenerator.generate()"]
+    PipelineGen --> LoadPipeline["1. Load Pipeline + Workflow"]
+    PipelineGen --> PrepDocMeta["2. Prepare document metadata\nas system variables\n(document_id, dataset_id, datasource_type, batch, ...)"]
+    PipelineGen --> CreateRAGEntity["3. Create RagPipelineGenerateEntity"]
+    PipelineGen --> SpawnPipeline["4. Spawn background thread"]
+    SpawnPipeline --> PipelineRunner["PipelineRunner.run()"]
+    PipelineRunner --> SimilarWF["Similar to WorkflowAppRunner"]
+    PipelineRunner --> DatasourceRoot["DATASOURCE node as root\ninstead of START"]
+    PipelineRunner --> RAGVars["RAG-specific system variables"]
+    PipelineGen --> ReturnResult["Return task pipeline or result"]
 ```
 
 ## App Config System
@@ -258,34 +224,42 @@ for the frontend.
 
 ### Queue Event Flow
 
+```mermaid
+graph TD
+    GEEvents["GraphEngine Events"] --> HandleEvent["WorkflowBasedAppRunner._handle_event()\nConverts GraphEngineEvent -> QueueEvent"]
+    HandleEvent --> QueueMgr["AppQueueManager.publish(event)\nThread-safe queue.Queue"]
+    QueueMgr --> TaskPipeline["GenerateTaskPipeline.process()\nConsumes QueueEvents\nConverts to response format"]
+    TaskPipeline --> SSEStream["SSE Response Stream\nworkflow_started -> node_started ->\ntext_chunk -> workflow_finished"]
 ```
-GraphEngine Events
-    |
-    v
-WorkflowBasedAppRunner._handle_event()
-    |   Converts GraphEngineEvent -> QueueEvent
-    |   Examples:
-    |     GraphRunStartedEvent     -> QueueWorkflowStartedEvent
-    |     NodeRunStartedEvent      -> QueueNodeStartedEvent
-    |     NodeRunSucceededEvent    -> QueueNodeSucceededEvent
-    |     NodeRunStreamChunkEvent  -> QueueTextChunkEvent
-    |     GraphRunSucceededEvent   -> QueueWorkflowSucceededEvent
-    |
-    v
-AppQueueManager.publish(event)
-    |   Thread-safe queue.Queue
-    |
-    v
-GenerateTaskPipeline.process()
-    |   Consumes QueueEvents
-    |   Converts to response format
-    |
-    v
-SSE Response Stream
-    data: {"event": "workflow_started", ...}\n\n
-    data: {"event": "node_started", ...}\n\n
-    data: {"event": "text_chunk", ...}\n\n
-    data: {"event": "workflow_finished", ...}\n\n
+
+### Chat Request and Workflow Execution Flow
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Controller
+    participant Generator as AppGenerator
+    participant Runner as AppRunner
+    participant Engine as GraphEngine
+    participant Queue as AppQueueManager
+    participant Pipeline as TaskPipeline
+
+    Client->>Controller: POST /chat-messages
+    Controller->>Generator: generate(inputs)
+    Generator->>Generator: Load workflow, validate config
+    Generator->>Generator: Create conversation + message
+    Generator-->>Controller: TaskPipeline (streaming)
+
+    Note over Generator,Runner: Background thread
+    Generator->>Runner: run()
+    Runner->>Engine: GraphEngine.run()
+    loop For each node
+        Engine->>Engine: Execute node
+        Engine-->>Runner: GraphEngineEvent
+        Runner->>Queue: publish(QueueEvent)
+    end
+    Queue-->>Pipeline: consume events
+    Pipeline-->>Client: SSE stream events
 ```
 
 ### Queue Events

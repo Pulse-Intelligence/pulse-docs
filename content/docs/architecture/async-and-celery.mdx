@@ -11,41 +11,26 @@ for Pulse's asynchronous task processing.
 
 Pulse defines 15+ dedicated Celery queues, each serving a distinct workload:
 
-```
-+================================================================+
-|                     Redis (Broker)                              |
-|                                                                |
-|  +---------------+  +------------------+  +------------------+ |
-|  | dataset       |  | priority_dataset |  | pipeline         | |
-|  | (doc indexing)|  | (priority index) |  | (RAG pipeline)   | |
-|  +---------------+  +------------------+  +------------------+ |
-|                                                                |
-|  +---------------+  +------------------+  +------------------+ |
-|  | mail          |  | ops_trace        |  | app_deletion     | |
-|  | (SMTP sends)  |  | (observability)  |  | (cleanup)        | |
-|  +---------------+  +------------------+  +------------------+ |
-|                                                                |
-|  +---------------+  +------------------+  +------------------+ |
-|  | plugin        |  | workflow_storage |  | conversation     | |
-|  | (plugin ops)  |  | (exec persist)   |  | (conv cleanup)   | |
-|  +---------------+  +------------------+  +------------------+ |
-|                                                                |
-|  +---------------+  +------------------+  +------------------+ |
-|  | workflow       |  | schedule_poller  |  | schedule_executor| |
-|  | (async exec)  |  | (cron polling)   |  | (sched runs)     | |
-|  +---------------+  +------------------+  +------------------+ |
-|                                                                |
-|  +---------------+  +------------------+  +------------------+ |
-|  | triggered_    |  | trigger_refresh_ |  | workflow_        | |
-|  | workflow_     |  | executor         |  | draft_var        | |
-|  | dispatcher    |  | (sub renewal)    |  | (draft vars)     | |
-|  +---------------+  +------------------+  +------------------+ |
-|                                                                |
-|  +-------------------+                                         |
-|  | priority_pipeline  |                                        |
-|  | (priority RAG)     |                                        |
-|  +-------------------+                                         |
-+================================================================+
+```mermaid
+graph TD
+    subgraph RedisBroker["Redis (Broker)"]
+        dataset["dataset\n(doc indexing)"]
+        priority_dataset["priority_dataset\n(priority index)"]
+        pipeline["pipeline\n(RAG pipeline)"]
+        mail["mail\n(SMTP sends)"]
+        ops_trace["ops_trace\n(observability)"]
+        app_deletion["app_deletion\n(cleanup)"]
+        plugin["plugin\n(plugin ops)"]
+        workflow_storage["workflow_storage\n(exec persist)"]
+        conversation["conversation\n(conv cleanup)"]
+        workflow["workflow\n(async exec)"]
+        schedule_poller["schedule_poller\n(cron polling)"]
+        schedule_executor["schedule_executor\n(sched runs)"]
+        triggered_workflow["triggered_workflow_\ndispatcher"]
+        trigger_refresh["trigger_refresh_\nexecutor\n(sub renewal)"]
+        workflow_draft_var["workflow_draft_var\n(draft vars)"]
+        priority_pipeline["priority_pipeline\n(priority RAG)"]
+    end
 ```
 
 ## Queue Design Rationale
@@ -75,12 +60,13 @@ Pulse defines 15+ dedicated Celery queues, each serving a distinct workload:
 
 Two queue pairs use priority queues for tiered processing:
 
-```
-Standard:   dataset  ---------> Worker Pool A (bulk indexing)
-Priority:   priority_dataset -> Worker Pool A (same workers, higher priority)
+```mermaid
+graph LR
+    dataset["dataset (standard)"] --> PoolA["Worker Pool A\n(bulk indexing)"]
+    priority_dataset["priority_dataset"] -->|higher priority| PoolA
 
-Standard:   pipeline ----------> Worker Pool B (bulk pipeline)
-Priority:   priority_pipeline -> Worker Pool B (same workers, higher priority)
+    pipeline["pipeline (standard)"] --> PoolB["Worker Pool B\n(bulk pipeline)"]
+    priority_pipeline["priority_pipeline"] -->|higher priority| PoolB
 ```
 
 ## Task Routing

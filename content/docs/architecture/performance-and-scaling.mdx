@@ -27,14 +27,15 @@ layer.
 
 In a typical Pulse deployment, latency breaks down as follows:
 
-```
-Total request latency (e.g., chatbot response)
-|
-|-- [60-80%] LLM inference          <-- external API, rate-limited
-|-- [5-15%]  Embedding generation   <-- external API, cacheable
-|-- [3-10%]  Vector search          <-- local or managed service
-|-- [2-5%]   Database queries       <-- connection pool bounded
-|-- [1-3%]   Internal orchestration  <-- graph engine, variable pool
+```mermaid
+graph LR
+    subgraph Latency["Total request latency (chatbot response)"]
+        LLM["LLM inference\n60-80%\nexternal API, rate-limited"]
+        Embed["Embedding generation\n5-15%\nexternal API, cacheable"]
+        VecSearch["Vector search\n3-10%\nlocal or managed service"]
+        DBQueries["Database queries\n2-5%\nconnection pool bounded"]
+        Internal["Internal orchestration\n1-3%\ngraph engine, variable pool"]
+    end
 ```
 
 **Key insight**: The dominant bottleneck is external LLM API latency. Internal
@@ -96,13 +97,18 @@ GRAPH_ENGINE_SCALE_DOWN_IDLE_TIME: float = Field(
 
 ### Scaling Behavior
 
-```
-Ready Queue Depth    Workers Active    Action
------------------    ---------------   ------
-0                    min_workers       Idle -- no action
-1-2                  min_workers       Workers consume from queue
-3+ (threshold)       scale up          Spawn additional worker thread
-0 (idle > 5s)        > min_workers     Scale down one worker
+```mermaid
+graph TD
+    subgraph ScalingBehavior["Worker Pool Scaling Behavior"]
+        Idle["Queue Depth: 0\nWorkers: min_workers\nAction: Idle"]
+        Normal["Queue Depth: 1-2\nWorkers: min_workers\nAction: Workers consume from queue"]
+        ScaleUp["Queue Depth: 3+ (threshold)\nWorkers: scale up\nAction: Spawn additional worker thread"]
+        ScaleDown["Queue Depth: 0 (idle > 5s)\nWorkers: > min_workers\nAction: Scale down one worker"]
+    end
+    Idle --> Normal
+    Normal --> ScaleUp
+    ScaleUp --> ScaleDown
+    ScaleDown --> Idle
 ```
 
 The pool implementation (`api/core/workflow/graph_engine/worker_management/worker_pool.py`)
@@ -150,16 +156,14 @@ CELERY_MAX_TASKS_PER_CHILD=100  # Restart worker after N tasks (memory leak prot
 
 ### Queue Architecture
 
-```
-+-------------+     +---------+     +-------------+
-|  API Server | --> |  Redis  | --> | Celery      |
-|  (enqueue)  |     | (broker)|     | Workers     |
-+-------------+     +---------+     +------+------+
-                                           |
-                    +----------+-----------+----------+
-                    |          |           |          |
-               dataset    workflow    scheduled   plugin
-               indexing   execution   triggers    callbacks
+```mermaid
+graph TD
+    APIServer["API Server\n(enqueue)"] --> Redis["Redis\n(broker)"]
+    Redis --> CeleryWorkers["Celery Workers"]
+    CeleryWorkers --> DatasetIdx["dataset\nindexing"]
+    CeleryWorkers --> WFExec["workflow\nexecution"]
+    CeleryWorkers --> ScheduledTrig["scheduled\ntriggers"]
+    CeleryWorkers --> PluginCB["plugin\ncallbacks"]
 ```
 
 ### Scaling Strategies
@@ -199,14 +203,10 @@ SQLALCHEMY_POOL_PRE_PING = True # Validate before checkout
 
 ### Connection Budget
 
-```
-Total connections per process = POOL_SIZE + MAX_OVERFLOW = 40
-
-If running 4 API processes + 2 Celery workers:
-  Total connections = 6 * 40 = 240
-
-PostgreSQL max_connections default = 100
-  --> MUST increase PostgreSQL max_connections or reduce pool sizes
+```mermaid
+graph TD
+    PerProcess["Per process:\nPOOL_SIZE + MAX_OVERFLOW = 40"] --> TotalConns["4 API processes + 2 Celery workers\nTotal connections = 6 x 40 = 240"]
+    TotalConns --> Warning["PostgreSQL max_connections default = 100\nMUST increase max_connections\nor reduce pool sizes"]
 ```
 
 ### Tuning for Deployment Size
@@ -307,21 +307,14 @@ When both semantic and keyword search are enabled, they run in parallel
 using `ThreadPoolExecutor` with configurable worker count
 (`RETRIEVAL_SERVICE_EXECUTORS`):
 
-```
-Query arrives
-     |
-     +----> [Thread 1] Semantic search (vector similarity)
-     |
-     +----> [Thread 2] Keyword search (BM25 / full-text)
-     |
-     v
-Wait for both to complete
-     |
-     v
-Merge + deduplicate + rerank
-     |
-     v
-Return top-K results
+```mermaid
+graph TD
+    QueryArrives["Query arrives"] --> Thread1["Thread 1: Semantic search\n(vector similarity)"]
+    QueryArrives --> Thread2["Thread 2: Keyword search\n(BM25 / full-text)"]
+    Thread1 --> WaitBoth["Wait for both to complete"]
+    Thread2 --> WaitBoth
+    WaitBoth --> MergeRerank["Merge + deduplicate + rerank"]
+    MergeRerank --> ReturnTopK["Return top-K results"]
 ```
 
 This parallelization cuts hybrid retrieval latency roughly in half compared
@@ -335,11 +328,11 @@ to sequential execution.
 
 Pulse streams LLM responses to reduce perceived latency:
 
-```
-User  <--SSE--  Flask API  <--Pub/Sub--  Celery Worker  <--Stream--  LLM Provider
- |                  |                        |                          |
- |  token arrives   |   publish to Redis     |    token generated       |
- |<--- ~10ms ---    |<----- ~1ms ------      |<----- ~20ms -------     |
+```mermaid
+graph RL
+    LLMProvider["LLM Provider"] -->|"Stream\n~20ms"| CeleryWorker["Celery Worker"]
+    CeleryWorker -->|"Pub/Sub to Redis\n~1ms"| FlaskAPI["Flask API"]
+    FlaskAPI -->|"SSE\n~10ms"| User["User"]
 ```
 
 **Time to first visible token**: Typically 200-500ms after the LLM starts
@@ -358,55 +351,36 @@ generating, dominated by the provider's time-to-first-token.
 
 ### Small Deployment (1-10 concurrent users)
 
-```
-+-------------+     +-----------+     +----------+
-|  Flask API  |---->|  Redis    |---->| Postgres |
-|  (1 proc)   |     | (1 inst)  |     | (1 inst) |
-+------+------+     +-----------+     +----------+
-       |
-+------v------+
-| Celery      |
-| (1 worker)  |
-+-------------+
+```mermaid
+graph LR
+    FlaskSmall["Flask API\n(1 proc)"] --> RedisSmall["Redis\n(1 inst)"]
+    RedisSmall --> PGSmall["Postgres\n(1 inst)"]
+    FlaskSmall --> CelerySmall["Celery\n(1 worker)"]
 ```
 
 ### Medium Deployment (10-100 concurrent users)
 
-```
-+---+---+---+---+       +-----------+       +-----------+
-| API  | API    |------>|  Redis    |------>| Postgres  |
-| (x2) | (x2)  |       | (1 inst)  |       | (1 inst)  |
-+---+---+---+---+       +-----------+       +-----------+
-       |                                          |
-+------v------+------+                   +--------v--------+
-| Celery (x2) | Celery (x2)|            | PgBouncer       |
-| (general)   | (indexing) |            | (conn pooler)   |
-+-------------+------------+            +-----------------+
+```mermaid
+graph TD
+    APIMed["API (x2)"] --> RedisMed["Redis\n(1 inst)"]
+    RedisMed --> PGMed["Postgres\n(1 inst)"]
+    APIMed --> CeleryGeneral["Celery (x2)\n(general)"]
+    APIMed --> CeleryIndex["Celery (x2)\n(indexing)"]
+    PGMed --> PgBouncerMed["PgBouncer\n(conn pooler)"]
 ```
 
 ### Large Deployment (100+ concurrent users)
 
-```
-                     +-- Load Balancer --+
-                     |                   |
-              +------v------+    +------v------+
-              | API (x4+)   |    | API (x4+)   |
-              +------+------+    +------+------+
-                     |                   |
-              +------v------------------v------+
-              |         Redis Cluster          |
-              | (cache) | (pub/sub) | (broker) |
-              +------+------------------+------+
-                     |                   |
-              +------v------+    +------v------+
-              | Celery (xN) |    | Celery (xN) |
-              | (general)   |    | (indexing)   |
-              +------+------+    +------+------+
-                     |                   |
-              +------v------------------v------+
-              |    PostgreSQL + PgBouncer      |
-              |    (primary + read replicas)   |
-              +--------------------------------+
+```mermaid
+graph TD
+    LB["Load Balancer"] --> API1["API (x4+)"]
+    LB --> API2["API (x4+)"]
+    API1 --> RedisCluster["Redis Cluster\n(cache | pub/sub | broker)"]
+    API2 --> RedisCluster
+    RedisCluster --> CeleryLargeGen["Celery (xN)\n(general)"]
+    RedisCluster --> CeleryLargeIdx["Celery (xN)\n(indexing)"]
+    CeleryLargeGen --> PGLarge["PostgreSQL + PgBouncer\n(primary + read replicas)"]
+    CeleryLargeIdx --> PGLarge
 ```
 
 ---
