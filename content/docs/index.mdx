@@ -1,0 +1,161 @@
+---
+title: "Pulse Documentation"
+description: "Everyone"
+---
+
+Welcome to the Pulse documentation hub. Pulse is a fork of [Dify](https://github.com/langgenius/dify) --
+an open-source platform for building LLM-powered applications with an intuitive
+visual interface, agentic workflows, RAG pipelines, and plugin-based model
+management.
+
+## How to Use These Docs
+
+The documentation is organized into four tiers, each aimed at a different
+audience and level of depth. Start with whichever tier matches your current
+need and follow the cross-references to go deeper.
+
+```
++---------------------+
+|   Tier 1: Overview   |
+|  (this directory)    |
++----------+----------+
+           |
++----------v----------+     +---------------------+
+| Tier 2: Contributing |     | Tier 4: User Guide  |
+|  (contributing/)     |     |  (user-guide/)      |
++----------+----------+     | Non-technical users  |
+           |                 +---------------------+
++----------v----------+
+| Tier 3: Architecture |
+|  (architecture/)     |
++---------------------+
+```
+
+## Tier 1 -- Project Overview
+
+Start here if you are new to Pulse or need a quick reference.
+
+| Document | Description |
+|----------|-------------|
+| [Glossary](/docs/glossary) | Shared vocabulary -- terms used throughout the codebase and docs |
+
+## Tier 2 -- Contributing Guide
+
+Start here when you are ready to write code.
+
+| Document | Description |
+|----------|-------------|
+| [Contributing Index](/docs/contributing) | Learning path for new engineers |
+| [01 Getting Started](/docs/contributing/getting-started) | Dev setup from git clone to running app |
+| [02 Project Structure](/docs/contributing/project-structure) | Directory map and architectural layers |
+| [03 First Contribution](/docs/contributing/first-contribution) | Branch naming, quality checks, PR process |
+| [04 Backend Patterns](/docs/contributing/backend-patterns) | Flask, controllers, services, config, errors |
+| [05 Frontend Patterns](/docs/contributing/frontend-patterns) | Next.js 15, React 19, Zustand, i18n, ORPC |
+| [06 Adding a Feature](/docs/contributing/adding-a-feature) | End-to-end walkthrough (new workflow node) |
+| [07 Testing Guide](/docs/contributing/testing-guide) | pytest, Vitest, TDD, mocking patterns |
+| [08 Code Review Checklist](/docs/contributing/code-review-checklist) | What reviewers look for |
+| [09 Database & Migrations](/docs/contributing/database-and-migrations) | SQLAlchemy models, Alembic, session patterns |
+| [10 Celery & Async](/docs/contributing/celery-and-async) | Writing tasks, queues, workers |
+| [11 Common Mistakes](/docs/contributing/common-mistakes) | Pitfalls and how to avoid them |
+
+## Tier 3 -- Architecture Deep Dives
+
+For senior engineers who need to understand internal design decisions.
+
+| Document | Description |
+|----------|-------------|
+| [Architecture Index](/docs/architecture) | Full index of architecture docs |
+| [01 System Overview](/docs/architecture/system-overview) | High-level system architecture |
+| [02 Workflow Engine](/docs/architecture/workflow-engine) | DAG executor, parallel workers |
+| [03 RAG Pipeline](/docs/architecture/rag-pipeline) | Extract, chunk, embed, index, retrieve, rerank |
+| [04 Model Runtime](/docs/architecture/model-runtime) | Provider abstraction, model management |
+| [05 Plugin System](/docs/architecture/plugin-system) | Plugin daemon, lifecycle, isolation |
+| [06 Trigger System](/docs/architecture/trigger-system) | Webhooks, schedules, plugin triggers |
+| [07 Multi-Tenancy](/docs/architecture/multi-tenancy) | Tenant isolation, RBAC |
+| [08 App Modes & Runners](/docs/architecture/app-modes-and-runners) | Six app modes, execution runners |
+| [09 Async & Celery](/docs/architecture/async-and-celery) | Task queues, worker architecture |
+| [10 Storage & Data Flow](/docs/architecture/storage-and-data-flow) | PostgreSQL, Redis, vector stores, blob storage, Variable Pool |
+| [11 Performance & Scaling](/docs/architecture/performance-and-scaling) | Bottlenecks, worker pools, connection pooling, caching |
+| [12 Observability](/docs/architecture/observability) | OpenTelemetry, structured logging, tracing |
+| [13 Security Model](/docs/architecture/security-model) | SSRF proxy, sandbox, encryption, RBAC, plugin security |
+| [14 Design Decisions](/docs/architecture/design-decisions) | Architecture Decision Records (ADRs) |
+
+## Tier 4 -- User Guide
+
+For non-technical users (product managers, founders, business people).
+No code, no jargon.
+
+| Document | Description |
+|----------|-------------|
+| [User Guide Index](/docs/user-guide) | Learning path and quick glossary |
+| [01 What Is Pulse?](/docs/user-guide/what-is-pulse) | Core concepts in plain language |
+| [02 Getting Started](/docs/user-guide/getting-started) | Access, account setup, dashboard navigation |
+| [03 First Chatbot](/docs/user-guide/building-your-first-chatbot) | Build a chatbot in 10 minutes |
+| [04 Building a Workflow](/docs/user-guide/building-a-workflow) | Visual workflow builder guide |
+| [05 Node Reference](/docs/user-guide/node-reference) | All 29 node types explained |
+| [06 Knowledge Bases](/docs/user-guide/knowledge-bases) | Upload documents, search your data |
+| [07 Model Configuration](/docs/user-guide/model-configuration) | Add AI models, choose the right one |
+| [08 Recipes](/docs/user-guide/recipes) | Step-by-step guides for common use cases |
+| [09 Troubleshooting](/docs/user-guide/troubleshooting-faq) | Common issues and solutions |
+| [10 App Modes](/docs/user-guide/app-modes) | Six app types compared with decision table |
+
+## Quick Navigation by Role
+
+### "I want to run Pulse locally"
+
+Start with [01 Getting Started](/docs/contributing/getting-started).
+
+### "I want to fix a bug or add a small feature"
+
+1. [01 Getting Started](/docs/contributing/getting-started) -- set up your environment
+2. [03 First Contribution](/docs/contributing/first-contribution) -- branch, test, PR
+3. [04 Backend Patterns](/docs/contributing/backend-patterns) or
+   [05 Frontend Patterns](/docs/contributing/frontend-patterns) -- coding conventions
+
+### "I want to add a major feature"
+
+1. All of the above, plus:
+2. [06 Adding a Feature](/docs/contributing/adding-a-feature) -- end-to-end walkthrough
+3. [09 Database & Migrations](/docs/contributing/database-and-migrations) -- if schema changes needed
+4. [10 Celery & Async](/docs/contributing/celery-and-async) -- if background work needed
+
+### "I want to review code"
+
+See [08 Code Review Checklist](/docs/contributing/code-review-checklist).
+
+### "I want to understand a term"
+
+See [Glossary](/docs/glossary).
+
+### "I want to use Pulse (not develop it)"
+
+Start with the [User Guide](/docs/user-guide). No code required.
+
+## Conventions Used in These Docs
+
+Every document follows these conventions:
+
+1. **Audience tag** -- Each file starts with an audience and prerequisites line.
+2. **Pulse branding** -- We use "Pulse" throughout. "Dify" appears only when
+   explaining our relationship to the upstream fork.
+3. **No secrets** -- Placeholder values like `YOUR_API_KEY` are used instead of
+   real credentials.
+4. **Cross-references** -- Documents link to each other with relative paths.
+5. **ASCII diagrams** -- Non-trivial flows are illustrated with ASCII art.
+6. **Code examples** -- Drawn from the actual codebase, not hypothetical.
+
+## Repository Layout at a Glance
+
+```
+pulse/
+  api/           Python Flask backend (DDD architecture)
+  web/           Next.js 15 frontend (TypeScript, React 19)
+  docker/        Docker Compose files and middleware config
+  docs/          This documentation tree
+  plugins/       Plugin manifests and configurations
+  sdks/          Client SDKs
+  scripts/       Build and deployment scripts
+  terraform/     Infrastructure-as-code
+```
+
+For a detailed breakdown, see [02 Project Structure](/docs/contributing/project-structure).

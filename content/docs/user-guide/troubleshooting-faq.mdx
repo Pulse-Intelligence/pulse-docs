@@ -1,0 +1,337 @@
+---
+title: "Troubleshooting and FAQ"
+description: "This chapter covers the most common issues people run into when using"
+---
+
+This chapter covers the most common issues people run into when using
+Pulse and how to fix them.
+
+---
+
+## Table of Contents
+
+1. [Model Issues](#model-issues)
+2. [Workflow Issues](#workflow-issues)
+3. [Knowledge Base Issues](#knowledge-base-issues)
+4. [API and Integration Issues](#api-and-integration-issues)
+5. [Permission Issues](#permission-issues)
+6. [Performance Issues](#performance-issues)
+7. [Frequently Asked Questions](#frequently-asked-questions)
+
+---
+
+## Model Issues
+
+### "Model not responding" or Timeout Errors
+
+**Symptoms**: The chatbot or workflow hangs, eventually showing a
+timeout error. No response is generated.
+
+**Common causes and fixes**:
+
+| Cause | How to Check | Fix |
+|-------|-------------|-----|
+| API key is invalid or expired | Go to Settings > Model Providers. Look for error indicators. | Generate a new API key from the provider's website and update it in Pulse. |
+| Provider is experiencing an outage | Check the provider's status page (e.g., status.openai.com). | Wait for the provider to recover, or switch to a different provider/model. |
+| Rate limit exceeded | Check for "rate limit" in the error message. | Wait a few minutes and try again. Consider setting up load balancing with multiple API keys. |
+| Model is not available in your region | Check the provider's documentation for regional availability. | Try a different model from the same provider, or use a different provider. |
+
+### Responses are Low Quality or Irrelevant
+
+**Symptoms**: The AI gives vague, wrong, or unhelpful answers.
+
+**Fixes**:
+
+1. **Improve your prompt**: Be more specific about what you want. Include
+   examples of good answers. Tell the AI what NOT to do.
+2. **Try a more capable model**: If you are using a small model (like
+   GPT-4o-mini or Haiku), try upgrading to a larger one (GPT-4o or
+   Sonnet) for complex tasks.
+3. **Lower the temperature**: Set temperature to 0.1-0.3 for factual
+   tasks. Higher temperatures produce more creative but less reliable
+   output.
+4. **Check your knowledge base**: If using RAG, the AI can only answer
+   as well as the documents it has access to. Run a hit test to verify
+   relevant information is being found.
+
+### Responses are Cut Off
+
+**Symptoms**: The AI's answer ends mid-sentence.
+
+**Fix**: Increase the **max tokens** setting on the LLM node. The
+default may be too low for long responses. Try doubling it.
+
+---
+
+## Workflow Issues
+
+### Workflow is Stuck or Not Completing
+
+**Symptoms**: The workflow starts but never finishes. It appears to be
+running indefinitely.
+
+**Common causes**:
+
+| Cause | Fix |
+|-------|-----|
+| A **Human Input** node is waiting for input | Check if there is a pending human input request. Provide the input or remove the node if not needed. |
+| An **HTTP Request** node is timing out | Check the URL and ensure the external service is available. Increase the timeout setting. |
+| A **Loop** node has no exit condition | Add or fix the exit condition. Always set a maximum iteration limit. |
+| A node is waiting for a model response that is taking too long | Check the model provider status. Try a faster model. |
+
+### Workflow Takes the Wrong Branch
+
+**Symptoms**: An IF/ELSE or Question Classifier routes to the wrong
+path.
+
+**Fixes**:
+
+1. **Check the classification prompt**: Open the classifier node and
+   review the prompts and category definitions. Are they clear and
+   unambiguous?
+2. **Test with the debug panel**: Run the workflow step by step and
+   check what the classifier actually outputs.
+3. **Add more examples**: In classification prompts, include examples
+   of each category to guide the AI.
+4. **Use a better model**: Small models may struggle with nuanced
+   classification. Try a more capable model.
+
+### Variable Reference Shows Empty or Wrong Value
+
+**Symptoms**: A node's output references a variable, but the value is
+empty or not what you expected.
+
+**Fixes**:
+
+1. **Check the variable name**: Make sure the `{{#node_name.variable#}}`
+   reference matches exactly. Variable names are case-sensitive.
+2. **Check the execution order**: Variables are only available from
+   nodes that have already completed. You cannot reference a node that
+   runs after the current one.
+3. **Check which branch ran**: In workflows with IF/ELSE, only one
+   branch executes. Variables from the other branch will be empty.
+4. **Use the debug panel**: Run the workflow and click each node to see
+   its actual output.
+
+### Cannot Connect Two Nodes
+
+**Symptoms**: You cannot draw a line between two nodes on the canvas.
+
+**Fixes**:
+
+1. **Check for cycles**: Workflows cannot have loops (circular
+   connections) outside of Loop and Iteration nodes. If connecting two
+   nodes would create a circle, Pulse prevents it.
+2. **Check node types**: Some nodes have specific input/output
+   requirements. Not every node can connect to every other node.
+3. **Refresh the page**: Occasionally the canvas has a rendering issue.
+   Refresh the browser and try again.
+
+---
+
+## Knowledge Base Issues
+
+### Knowledge Base Not Returning Results
+
+**Symptoms**: The Knowledge Retrieval node returns no results, even for
+questions that should match your documents.
+
+**Fixes**:
+
+| Check | Fix |
+|-------|-----|
+| Are documents processed? | Go to the knowledge base and check if documents show "Completed" status. Wait for processing to finish if still in progress. |
+| Is the embedding model configured? | Check Settings > Model Providers for an embedding model. Knowledge bases need an embedding model to work. |
+| Is the query too specific or too vague? | Use Hit Testing to try different phrasings of your question. |
+| Is the score threshold too high? | Lower the score threshold in the retrieval settings (try 0.3 instead of 0.7). |
+| Are the documents relevant? | Review the documents in the knowledge base. Do they actually contain the information being asked about? |
+
+### Knowledge Base Returns Irrelevant Results
+
+**Symptoms**: The retrieved chunks do not match the question.
+
+**Fixes**:
+
+1. **Adjust chunk size**: If chunks are too large, they may contain
+   both relevant and irrelevant content. Try smaller chunks (300-500
+   characters).
+2. **Use hybrid retrieval**: Switch from semantic-only to hybrid search
+   (combines meaning-based and keyword search).
+3. **Enable reranking**: Add a reranking model to re-order results and
+   push the most relevant ones to the top.
+4. **Improve document quality**: Well-structured documents with clear
+   headings and organized content produce better search results.
+
+### Document Upload Failed
+
+**Symptoms**: A document fails to process or shows an error status.
+
+**Fixes**:
+
+1. **Check file format**: Make sure the file type is supported (PDF,
+   DOCX, TXT, etc.).
+2. **Check file size**: Very large files may exceed processing limits.
+   Try splitting large documents into smaller files.
+3. **Check for corrupted files**: Try opening the file on your computer
+   to verify it is not corrupted.
+4. **Retry**: Delete the failed document and upload it again.
+
+---
+
+## API and Integration Issues
+
+### API Returns "Unauthorized" (401)
+
+**Cause**: The API key is missing, invalid, or expired.
+
+**Fix**: Go to the app's API settings, generate a new API key, and
+update it in your integration.
+
+### API Returns "Not Found" (404)
+
+**Cause**: The app ID in the URL is wrong, or the app has been deleted.
+
+**Fix**: Verify the app ID and URL. Check that the app still exists in
+your Pulse dashboard.
+
+### API Returns "Rate Limited" (429)
+
+**Cause**: Too many requests in a short period.
+
+**Fix**: Reduce request frequency. Implement retry logic with
+exponential backoff in your integration code.
+
+### Webhook Not Triggering
+
+**Symptoms**: Your webhook-triggered workflow is not running when the
+external system sends data.
+
+**Fixes**:
+
+1. **Check the URL**: Verify the external system is using the correct
+   webhook URL from Pulse.
+2. **Check the data format**: The incoming data must match what the
+   webhook trigger expects.
+3. **Check if the workflow is published**: Only published workflows
+   respond to webhook triggers.
+4. **Check network connectivity**: If Pulse is behind a firewall, the
+   external system may not be able to reach it.
+
+---
+
+## Permission Issues
+
+### "You do not have permission to perform this action"
+
+**Cause**: Your role in the workspace does not have the required
+permissions.
+
+| Action | Required Role |
+|--------|--------------|
+| Create/edit apps | Editor or higher |
+| View apps | Normal or higher |
+| Manage knowledge bases | Dataset Operator, Editor, or higher |
+| Manage model providers | Admin or higher |
+| Manage members | Admin or higher |
+| Delete workspace | Owner only |
+
+**Fix**: Ask your workspace Owner or Admin to upgrade your role.
+
+### Cannot See an App or Knowledge Base
+
+**Causes**:
+- You are in the wrong workspace (check the workspace selector)
+- The resource was deleted
+- Your role does not have view permissions
+
+---
+
+## Performance Issues
+
+### Slow Response Times
+
+**Possible causes and fixes**:
+
+| Cause | Fix |
+|-------|-----|
+| Using a large, slow model | Switch to a faster model for non-critical tasks |
+| Workflow has too many sequential LLM calls | Reduce the number of AI steps, or combine steps |
+| Knowledge base search is slow | Reduce Top K, use simpler retrieval method |
+| External API calls are slow | Increase timeouts, check external service health |
+
+### High Model API Costs
+
+**Fixes**:
+
+1. Use smaller models for simple tasks (classification, routing).
+2. Reduce max token limits.
+3. Optimize prompts to be shorter.
+4. Enable embedding caching (reduces duplicate embedding calls).
+5. Set appropriate rate limits on published apps.
+
+---
+
+## Frequently Asked Questions
+
+### Can I use Pulse offline?
+
+No. Pulse requires an internet connection to communicate with model
+providers. If you use self-hosted models (via Ollama or vLLM), the
+AI calls stay on your network, but you still need access to the Pulse
+server.
+
+### How many apps can I create?
+
+There is no built-in limit on the number of apps. Practical limits
+depend on your deployment's resources and model API budgets.
+
+### Can I export my workflows?
+
+Yes. Workflows can be exported as configuration files (DSL format) and
+imported into another Pulse instance. Look for the export option in the
+app settings menu.
+
+### Can multiple people edit the same app?
+
+Currently, only one person should edit an app at a time. There is no
+real-time collaborative editing. The last person to save wins.
+
+### How do I delete an app?
+
+Go to the Apps list, find the app, click the menu (three dots), and
+select "Delete." You may need Editor or higher permissions.
+
+### Is my data secure?
+
+- Model provider API keys are encrypted at rest.
+- Data in transit uses TLS encryption.
+- Multi-tenant isolation prevents cross-workspace data access.
+- The SSRF proxy prevents workflows from accessing private networks.
+- See [Security Model](/docs/architecture/security-model) for the
+  full details (engineering audience).
+
+### Can I use my own models?
+
+Yes. Pulse supports self-hosted models through providers like Ollama,
+vLLM, and any OpenAI-compatible API. Configure them in Settings >
+Model Providers using the "Custom" or "OpenAI-compatible" option.
+
+### What happens if I exceed my model provider's rate limits?
+
+Your requests will fail with a rate limit error. To prevent this:
+- Set up load balancing with multiple API keys
+- Use smaller models for high-volume tasks
+- Add rate limits to your published apps
+
+---
+
+## Still Need Help?
+
+If your issue is not covered here:
+
+1. Check the workflow's run history for detailed error messages.
+2. Use the debug panel to step through the workflow and identify the
+   failing node.
+3. Review the [Node Reference](/docs/user-guide/node-reference) for the specific
+   node type that is causing issues.
+4. Contact your workspace administrator for deployment-specific issues.

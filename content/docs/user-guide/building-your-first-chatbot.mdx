@@ -1,0 +1,255 @@
+---
+title: "Building Your First Chatbot"
+description: "This chapter walks you through creating a simple chatbot from scratch."
+---
+
+> set up, model provider configured)
+
+This chapter walks you through creating a simple chatbot from scratch.
+By the end, you will have a working AI chatbot that you can test and
+share with others.
+
+**Time needed**: About 10 minutes.
+
+---
+
+## Table of Contents
+
+1. [What We Are Building](#what-we-are-building)
+2. [Step 1: Create the App](#step-1-create-the-app)
+3. [Step 2: Choose a Model](#step-2-choose-a-model)
+4. [Step 3: Write a System Prompt](#step-3-write-a-system-prompt)
+5. [Step 4: Test in the Debug Panel](#step-4-test-in-the-debug-panel)
+6. [Step 5: Adjust and Improve](#step-5-adjust-and-improve)
+7. [Step 6: Publish Your Chatbot](#step-6-publish-your-chatbot)
+8. [What You Learned](#what-you-learned)
+
+---
+
+## What We Are Building
+
+We are going to build a friendly assistant chatbot that helps answer
+questions about a fictional product called "Acme Widgets." This is a
+simple Chat mode app -- the user types messages and the AI responds in
+a conversational style.
+
+The same steps apply whether you are building a customer support bot, a
+personal assistant, or any other conversational application.
+
+---
+
+## Step 1: Create the App
+
+1. From the dashboard, click **"Create App"** in the top-right corner.
+2. Select **"Chatbot"** as the app type.
+3. A dialog will appear asking you to choose between:
+   - **Basic** -- a simple chatbot with one AI model
+   - **Workflow-based** -- a chatbot powered by a visual workflow
+4. Select **"Basic"** for now (we will cover workflows in the next
+   chapter).
+5. Give your app a name, for example: "Acme Support Bot."
+6. Optionally add a description: "Helps customers learn about Acme
+   Widgets."
+7. Click **"Create."**
+
+You will be taken to the app editor. This is where you configure how
+your chatbot behaves.
+
+---
+
+## Step 2: Choose a Model
+
+The model is the AI brain behind your chatbot. You need to select which
+model to use.
+
+1. In the app editor, find the **"Model"** section (usually at the top
+   or in a settings panel on the right).
+2. Click the model dropdown. You will see a list of available models
+   from the providers you configured in the previous chapter.
+3. Choose a model. If you are not sure which to pick:
+   - **For general use**: GPT-4o or Claude 3.5 Sonnet are good all-around
+     choices.
+   - **For lower cost**: GPT-4o-mini or Claude 3.5 Haiku are cheaper but
+     still capable.
+4. Leave the other model settings (temperature, max tokens) at their
+   defaults for now.
+
+> **Tip**: You can change the model at any time. Try different models
+> later to see which one gives the best answers for your use case.
+
+---
+
+## Step 3: Write a System Prompt
+
+The **system prompt** (also called "instructions" or "persona") tells
+the AI how to behave. This is the most important part of building a
+good chatbot.
+
+1. Find the **"System Prompt"** or **"Instructions"** text area in the
+   editor.
+2. Write instructions that define:
+   - **Who the AI is**: "You are a helpful customer support agent for
+     Acme Widgets."
+   - **How it should behave**: "Be friendly, concise, and professional."
+   - **What it should know**: "Acme Widgets come in three sizes: Small,
+     Medium, and Large. They are made of recycled aluminum."
+   - **What it should not do**: "Do not make up information. If you do
+     not know the answer, say so."
+
+Here is an example system prompt:
+
+```
+You are a friendly customer support agent for Acme Widgets.
+
+About Acme Widgets:
+- We sell widgets in three sizes: Small ($10), Medium ($25), and Large ($50)
+- All widgets are made from recycled aluminum
+- Free shipping on orders over $50
+- 30-day money-back guarantee
+- Support hours: Monday-Friday, 9 AM to 5 PM EST
+
+Your guidelines:
+- Be warm, helpful, and concise
+- Answer product questions accurately
+- For order issues, ask for the order number
+- If you do not know the answer, say: "Let me connect you with a specialist"
+- Never make up product information
+```
+
+3. Paste or type your system prompt into the text area.
+
+> **Tip**: The more specific your instructions, the better the AI
+> performs. Vague instructions lead to inconsistent behavior. Include
+> specific facts, rules, and examples.
+
+---
+
+## Step 4: Test in the Debug Panel
+
+Before sharing your chatbot with anyone, test it yourself using the
+built-in debug panel.
+
+1. Look for a **"Debug"** or **"Preview"** button (usually on the
+   right side of the editor, or at the top).
+2. Click it to open the debug panel. This shows a chat interface where
+   you can talk to your bot.
+3. Type a test message, for example: "Hi, how much does a large widget
+   cost?"
+4. Press Enter and wait for the response.
+5. Check the response:
+   - Is it accurate? (The large widget should be $50.)
+   - Is the tone right? (Should be friendly and professional.)
+   - Does it follow your instructions?
+
+### Test Different Scenarios
+
+Try several types of messages to make sure your bot handles them well:
+
+| Test Message                   | What You Are Checking                   |
+| ------------------------------ | --------------------------------------- |
+| "Hello!"                       | Greeting response                       |
+| "How much is a medium widget?" | Product knowledge                       |
+| "Do you ship internationally?" | Handling unknown information            |
+| "I want to return my order"    | Following instructions for order issues |
+| "Tell me a joke"               | Staying on topic                        |
+| "asdfgh"                       | Handling gibberish gracefully           |
+
+---
+
+## Step 5: Adjust and Improve
+
+Based on your testing, you will likely want to make adjustments:
+
+### If the AI Is Too Verbose
+
+Add to your system prompt: "Keep your responses under 3 sentences unless
+the user asks for more detail."
+
+### If the AI Makes Things Up
+
+Add: "Only answer questions based on the information I have provided.
+If a question is outside your knowledge, say so."
+
+### If the Tone Is Wrong
+
+Be more specific about tone: "Write as if you are talking to a friend --
+casual but professional. Use short sentences. Avoid jargon."
+
+### If It Does Not Know Enough
+
+Add more facts to the system prompt. The more specific information you
+include, the better the AI can answer questions about your product.
+
+> **For large amounts of information**: Instead of cramming everything
+> into the system prompt, use a Knowledge Base. See
+> [Chapter 06: Knowledge Bases](/docs/user-guide/knowledge-bases) to learn how.
+
+### Adjusting Model Settings
+
+If the AI's responses feel too creative or too robotic, try adjusting
+the **temperature** setting:
+
+- **Lower temperature** (closer to 0): More predictable, factual,
+  consistent responses. Good for customer support.
+- **Higher temperature** (closer to 1): More creative, varied responses.
+  Good for brainstorming or creative writing.
+
+---
+
+## Step 6: Publish Your Chatbot
+
+Once you are happy with how your chatbot behaves, it is time to share it.
+
+### Share Within Your Team
+
+1. Click **"Publish"** or **"Save & Publish"** in the top-right corner.
+2. Your chatbot is now live. Team members with access to your workspace
+   can find it in the Apps list.
+
+### Share via Link
+
+1. After publishing, look for a **"Share"** or **"Access"** section.
+2. You can generate a **public link** that anyone can use to chat with
+   your bot, even if they do not have a Pulse account.
+3. Copy the link and share it via email, Slack, or wherever your users
+   are.
+
+### Embed in a Website
+
+1. In the Share section, look for **"Embed"** options.
+2. You will find a small snippet that you can paste into your website's
+   HTML.
+3. This creates a chat widget that appears on your site, letting
+   visitors talk to your bot directly.
+
+### Publish as an API
+
+1. In the Share section, look for **"API Access."**
+2. You will find an API key and documentation for how other software
+   can talk to your chatbot.
+3. This is useful if you want to connect your chatbot to other tools
+   like Slack, Teams, or a custom application.
+
+---
+
+## What You Learned
+
+In this chapter, you:
+
+- Created a Chat mode app
+- Chose an AI model
+- Wrote a system prompt with specific instructions
+- Tested your chatbot in the debug panel
+- Adjusted the prompt based on test results
+- Published and shared your chatbot
+
+---
+
+## Next Steps
+
+Your chatbot is great for simple Q&A, but what if you need it to do
+more complex things -- like search a knowledge base, make decisions,
+or call external services? That is where workflows come in.
+
+Continue to [Building a Workflow](/docs/user-guide/building-a-workflow) to learn
+how to build more powerful applications.

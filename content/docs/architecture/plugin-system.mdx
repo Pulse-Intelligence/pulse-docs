@@ -1,0 +1,242 @@
+---
+title: "Plugin System"
+description: "Senior Engineers"
+---
+
+The plugin system extends Pulse with tools, model providers, datasources,
+agent strategies, triggers, and endpoints. All plugins run in a separate
+Go-based daemon process and communicate with the Flask API via HTTP.
+
+## Architecture Overview
+
+```
++-----------------------------+        HTTP        +---------------------------+
+|       Flask API Server      |<------------------>|    Plugin Daemon (Go)     |
+|       (port 5001)           |                    |    (port 5002/5003)       |
+|                             |                    |                           |
+|  +-----------------------+  |    /plugin/{tid}/  |  +---------------------+  |
+|  | BasePluginClient      |--+---> management/*   |  | Plugin Runtime     |  |
+|  |  - _request()         |  |                    |  |  - Load plugins    |  |
+|  |  - _stream_request()  |  |    /plugin/{tid}/  |  |  - Execute funcs  |  |
+|  +-----------------------+  |<--- invoke/*       |  |  - Manage state   |  |
+|                             |                    |  +---------------------+  |
+|  +-----------------------+  |                    |                           |
+|  | impl/ adapters:       |  |    Inner API       |  +---------------------+  |
+|  |  tool.py              |  |<-------------------+--| Backwards Invoc.   |  |
+|  |  model.py             |  |    (port 5001)     |  | Plugin -> Pulse API|  |
+|  |  datasource.py        |  |                    |  +---------------------+  |
+|  |  agent.py             |  |                    |                           |
+|  |  trigger.py           |  |                    |  +---------------------+  |
+|  |  endpoint.py          |  |                    |  | Plugin Storage     |  |
+|  +-----------------------+  |                    |  | /app/storage       |  |
++-----------------------------+                    |  +---------------------+  |
+                                                   +---------------------------+
+```
+
+## Plugin Categories
+
+| Category | Interface Class | Purpose |
+|----------|----------------|---------|
+| **Tool** | `PluginToolManager` | Invoke external tools (APIs, utilities) |
+| **Model** | `PluginModelClient` | Provide model implementations (LLM, embedding, etc.) |
+| **Datasource** | `PluginDatasourceClient` | Connect to data sources |
+| **Agent Strategy** | `PluginAgentClient` | Custom agent reasoning strategies |
+| **Trigger** | `PluginTriggerClient` | Event-driven workflow triggers |
+| **Endpoint** | `PluginEndpointClient` | Custom HTTP endpoints |
+| **Extension** | code-based | Server-side extensions |
+
+## BasePluginClient
+
+All plugin communication flows through `BasePluginClient`
+(`api/core/plugin/impl/base.py`):
+
+```python
+class BasePluginClient:
+    def _request(
+        self,
+        method: str,
+        path: str,
+        headers: dict[str, str] | None = None,
+        data: bytes | dict[str, Any] | str | None = None,
+        params: dict[str, Any] | None = None,
+        files: dict[str, Any] | None = None,
+    ) -> httpx.Response:
+        """Make a request to the plugin daemon inner API."""
+        url = str(plugin_daemon_inner_api_baseurl / path)
+        # ... build and send HTTP request
+```
+
+### Request Flow
+
+```
+Application Code
+    |
+    v
+PluginToolManager.invoke_tool(tenant_id, provider_id, tool_name, params)
+    |
+    v
+BasePluginClient._request("POST", f"plugin/{tenant_id}/invoke/tool", data={...})
+    |
+    v
+HTTP POST to Plugin Daemon (port 5002)
+    |
+    v
+Plugin Daemon routes to correct plugin instance
+    |
+    v
+Plugin executes tool function
+    |
+    v
+Response flows back through HTTP
+```
+
+## impl/ Adapter Layer
+
+Each plugin category has an adapter in `api/core/plugin/impl/`:
+
+```
+api/core/plugin/impl/
+  base.py          # BasePluginClient - HTTP communication
+  tool.py          # PluginToolManager - tool provider management
+  model.py         # PluginModelClient - model provider management
+  datasource.py    # PluginDatasourceClient - datasource operations
+  agent.py         # PluginAgentClient - agent strategy management
+  trigger.py       # PluginTriggerClient - trigger provider management
+  endpoint.py      # PluginEndpointClient - custom endpoint management
+  oauth.py         # OAuth flow handling for plugins
+  plugin.py        # Plugin lifecycle management
+  asset.py         # Plugin asset management
+  debugging.py     # Plugin debugging support
+  exc.py           # Plugin-specific exceptions
+```
+
+### PluginToolManager Example
+
+```python
+# api/core/plugin/impl/tool.py
+class PluginToolManager(BasePluginClient):
+    def fetch_tool_providers(self, tenant_id: str) -> list[PluginToolProviderEntity]:
+        """Fetch tool providers for the given tenant, including global plugins."""
+        providers = self._fetch_tool_providers_for_tenant(tenant_id)
+        if tenant_id != GLOBAL_TENANT_ID:
+            global_providers = self._fetch_tool_providers_for_tenant(GLOBAL_TENANT_ID)
+            # Merge, deduplicating by plugin_id
+            ...
+        return providers
+```
+
+## Plugin Daemon Architecture
+
+The Plugin Daemon is a Go application (`dify-plugin-daemon`) that manages
+plugin lifecycle:
+
+### Configuration (from docker-compose)
+
+```yaml
+plugin-daemon:
+  image: langgenius/dify-plugin-daemon:0.5.2-local
+  environment:
+    SERVER_PORT: "5002"
+    SERVER_KEY: ${PLUGIN_DAEMON_KEY}
+    DIFY_INNER_API_URL: http://host.docker.internal:5001
+    DIFY_INNER_API_KEY: ${PLUGIN_DIFY_INNER_API_KEY}
+    PLUGIN_REMOTE_INSTALLING_HOST: "0.0.0.0"
+    PLUGIN_REMOTE_INSTALLING_PORT: "5003"
+    FORCE_VERIFYING_SIGNATURE: "false"
+    MAX_PLUGIN_PACKAGE_SIZE: "52428800"
+    PLUGIN_MAX_EXECUTION_TIMEOUT: "600"
+    PYTHON_ENV_INIT_TIMEOUT: "120"
+```
+
+### Daemon Ports
+
+| Port | Purpose |
+|------|---------|
+| 5002 | Main API - plugin management and invocation |
+| 5003 | Remote plugin installation - debugging connection |
+
+### Backwards Invocation
+
+Plugins can call back into the Pulse API (e.g., to access storage, models,
+or database). This uses the `DIFY_INNER_API_URL` and `DIFY_INNER_API_KEY`:
+
+```
+Plugin Code (in daemon)
+    |
+    v
+HTTP to Pulse API (port 5001) with inner API key
+    |
+    v
+api/core/plugin/backwards_invocation/
+    Handles plugin callbacks for:
+    - Model invocation
+    - Storage access
+    - Tool chaining
+    - Knowledge retrieval
+```
+
+## Multi-Tenant Plugin Resolution
+
+Plugins are scoped at two levels:
+
+```
++------------------+     +------------------+
+| Global Plugins   |     | Tenant Plugins   |
+| (GLOBAL_TENANT)  |     | (per workspace)  |
++------------------+     +------------------+
+         |                        |
+         +--------+------+-------+
+                  |
+         +--------v--------+
+         | Merged Provider  |
+         | List (deduped)   |
+         +-----------------+
+```
+
+When fetching providers, the system:
+1. Fetches plugins for the specific tenant
+2. Fetches global plugins (installed system-wide)
+3. Merges, with tenant plugins taking precedence
+
+## Plugin Security
+
+### Signature Verification
+
+```yaml
+FORCE_VERIFYING_SIGNATURE: "false"
+ENFORCE_LANGGENIUS_PLUGIN_SIGNATURES: "false"
+THIRD_PARTY_SIGNATURE_VERIFICATION_ENABLED: "true"
+THIRD_PARTY_SIGNATURE_VERIFICATION_PUBLIC_KEYS: /app/keys/publickey.pem
+```
+
+### Resource Limits
+
+| Limit | Default | Purpose |
+|-------|---------|---------|
+| Max package size | 50 MB | Prevent oversized plugin uploads |
+| Execution timeout | 600s | Kill long-running plugin operations |
+| Python env init | 120s | Timeout for creating plugin virtualenvs |
+| Buffer size | 1 KB | stdio buffer per plugin |
+| Max buffer size | 5 MB | Maximum stdio buffer |
+
+## Error Handling
+
+Plugin errors are mapped to domain exceptions in `api/core/plugin/impl/exc.py`:
+
+```python
+PluginDaemonError              # Base plugin daemon error
+PluginDaemonBadRequestError    # 400 - Invalid request
+PluginDaemonUnauthorizedError  # 401 - Auth failure
+PluginDaemonNotFoundError      # 404 - Plugin not found
+PluginDaemonInternalServerError # 500 - Daemon error
+PluginInvokeError              # Tool/model invocation failure
+PluginNotFoundError            # Plugin not installed
+PluginPermissionDeniedError    # Insufficient permissions
+PluginUniqueIdentifierError    # ID conflict
+```
+
+## Cross-References
+
+- [04-Model Runtime](/docs/architecture/model-runtime) -- Model providers loaded via plugins
+- [06-Trigger System](/docs/architecture/trigger-system) -- Trigger plugins
+- [07-Multi-Tenancy](/docs/architecture/multi-tenancy) -- Per-tenant plugin scoping

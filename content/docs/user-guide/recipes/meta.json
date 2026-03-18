@@ -1,0 +1,10 @@
+{
+  "title": "Recipes",
+  "pages": [
+    "rag-chatbot",
+    "customer-support-bot",
+    "content-generation-pipeline",
+    "webhook-triggered-automation",
+    "scheduled-workflow"
+  ]
+}

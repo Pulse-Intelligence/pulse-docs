@@ -1,0 +1,387 @@
+---
+title: "Backend Patterns"
+description: "Backend engineers"
+---
+
+This document covers the practical patterns you need to follow when writing
+backend code for Pulse. Every example is drawn from or modeled on the actual
+codebase.
+
+## Flask App Factory
+
+Pulse uses the app factory pattern. The application is created in
+`api/app_factory.py`:
+
+```python
+# app_factory.py
+def create_app() -> DifyApp:
+    app = create_flask_app_with_configs()
+    initialize_extensions(app)
+    return app
+```
+
+Extensions are initialized in a specific order (see
+[02 Project Structure](/docs/contributing/project-structure) for the full list). Never
+import the app object directly -- it is created at startup and passed through
+Flask's application context.
+
+## The Controller Pattern
+
+Controllers live in `api/controllers/` and are the HTTP boundary. They have
+one job: translate HTTP into service calls and back.
+
+### Do This
+
+```python
+from pydantic import BaseModel, ConfigDict
+from services.workflow_service import WorkflowService
+
+
+class CreateWorkflowRequest(BaseModel):
+    name: str
+    description: str = ""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class WorkflowController:
+    def create(self, tenant_id: str, user_id: str):
+        # 1. Parse input with Pydantic
+        data = CreateWorkflowRequest.model_validate(request.get_json())
+
+        # 2. Delegate to service
+        workflow = WorkflowService.create_workflow(
+            tenant_id=tenant_id,
+            name=data.name,
+            description=data.description,
+            user_id=user_id,
+        )
+
+        # 3. Return serialized response
+        return {"id": workflow.id, "name": workflow.name}, 201
+```
+
+### Not That
+
+```python
+# BAD: Business logic in a controller
+class WorkflowController:
+    def create(self, tenant_id: str, user_id: str):
+        data = request.get_json()
+        # BAD: Direct DB access in controller
+        with Session(db.engine) as session:
+            workflow = Workflow(
+                tenant_id=tenant_id,
+                name=data["name"],
+            )
+            session.add(workflow)
+            session.commit()
+        return {"id": workflow.id}, 201
+```
+
+**Rules:**
+- No database access in controllers
+- No business logic (validation beyond input shape, authorization, quotas)
+- Parse input with Pydantic models using `ConfigDict(extra="forbid")`
+- Return serialized dicts, not ORM objects
+
+## The Service Pattern
+
+Services live in `api/services/` and contain all business logic.
+
+### Do This
+
+```python
+import logging
+
+from models.workflow import Workflow
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from extensions.ext_database import db
+
+logger = logging.getLogger(__name__)
+
+
+class WorkflowService:
+    @staticmethod
+    def create_workflow(
+        tenant_id: str,
+        name: str,
+        description: str,
+        user_id: str,
+    ) -> Workflow:
+        """Create a new workflow scoped to a tenant."""
+        with Session(db.engine, expire_on_commit=False) as session:
+            workflow = Workflow(
+                tenant_id=tenant_id,
+                name=name,
+                description=description,
+                created_by=user_id,
+            )
+            session.add(workflow)
+            session.commit()
+
+        logger.info(
+            "Created workflow %s for tenant %s",
+            workflow.id,
+            tenant_id,
+        )
+        return workflow
+
+    @staticmethod
+    def get_workflow(tenant_id: str, workflow_id: str) -> Workflow:
+        """Fetch a workflow, always scoped by tenant."""
+        with Session(db.engine, expire_on_commit=False) as session:
+            stmt = select(Workflow).where(
+                Workflow.id == workflow_id,
+                Workflow.tenant_id == tenant_id,  # ALWAYS filter by tenant
+            )
+            workflow = session.execute(stmt).scalar_one_or_none()
+
+        if not workflow:
+            raise WorkflowNotFoundError(workflow_id)
+
+        return workflow
+```
+
+### Not That
+
+```python
+# BAD: Missing tenant_id, using print, catching generic exceptions
+class WorkflowService:
+    @staticmethod
+    def get_workflow(workflow_id: str) -> Workflow:
+        try:
+            # BAD: No tenant_id filter
+            workflow = db.session.query(Workflow).get(workflow_id)
+            print(f"Found workflow {workflow_id}")  # BAD: use logger
+            return workflow
+        except Exception:  # BAD: too broad
+            return None  # BAD: silently swallowing errors
+```
+
+**Rules:**
+- Always accept and filter by `tenant_id`
+- Use `logging.getLogger(__name__)` -- never `print()`
+- Raise domain-specific exceptions from `services/errors/`
+- Use context managers for database sessions
+- Keep side effects explicit (logging, events, tasks)
+
+## Configuration via dify_config
+
+All runtime settings flow through `configs.dify_config`. This is a Pydantic v2
+`BaseSettings` instance that loads from environment variables and `.env` files.
+
+### Do This
+
+```python
+from configs import dify_config
+
+# Access a setting
+max_upload_size = dify_config.UPLOAD_FILE_SIZE_LIMIT
+debug_mode = dify_config.DEBUG
+```
+
+### Not That
+
+```python
+import os
+
+# BAD: Reading env vars directly
+max_upload_size = int(os.environ.get("UPLOAD_FILE_SIZE_LIMIT", "10"))
+```
+
+### Adding a New Setting
+
+1. Find the appropriate mixin in `api/configs/` (deploy, feature, middleware,
+   observability, etc.)
+2. Add the field with a type annotation and default:
+
+```python
+# In configs/feature/feature_config.py
+class FeatureConfig(BaseSettings):
+    MY_NEW_FEATURE_ENABLED: bool = False
+    MY_NEW_FEATURE_LIMIT: int = 100
+```
+
+3. Access it via `dify_config.MY_NEW_FEATURE_ENABLED`
+
+## Error Handling
+
+Pulse uses a layered error handling approach.
+
+### Domain Exceptions
+
+Define exceptions in the appropriate error module:
+
+```python
+# services/errors/workflow_service.py
+class WorkflowNotFoundError(Exception):
+    def __init__(self, workflow_id: str):
+        self.workflow_id = workflow_id
+        super().__init__(f"Workflow {workflow_id} not found")
+
+
+class WorkflowQuotaExceededError(Exception):
+    def __init__(self, tenant_id: str, limit: int):
+        self.tenant_id = tenant_id
+        self.limit = limit
+        super().__init__(
+            f"Tenant {tenant_id} exceeded workflow limit of {limit}"
+        )
+```
+
+### Controller Error Translation
+
+Controllers catch domain exceptions and return HTTP responses:
+
+```python
+from services.errors.workflow_service import (
+    WorkflowNotFoundError,
+    WorkflowQuotaExceededError,
+)
+
+
+class WorkflowController:
+    def get(self, tenant_id: str, workflow_id: str):
+        try:
+            workflow = WorkflowService.get_workflow(tenant_id, workflow_id)
+            return {"id": workflow.id, "name": workflow.name}
+        except WorkflowNotFoundError:
+            return {"error": "Workflow not found"}, 404
+        except WorkflowQuotaExceededError as e:
+            return {"error": str(e)}, 429
+```
+
+### Logging Conventions
+
+```python
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Include context identifiers
+logger.info(
+    "Processing workflow %s for tenant %s",
+    workflow_id,
+    tenant_id,
+)
+
+# Retryable issues at WARNING
+logger.warning(
+    "Temporary failure connecting to vector store, will retry",
+    exc_info=True,
+)
+
+# Terminal failures at ERROR
+logger.error(
+    "Failed to index document %s: %s",
+    document_id,
+    str(e),
+    exc_info=True,
+)
+```
+
+## Pydantic DTOs
+
+Use Pydantic v2 for request/response models and internal DTOs.
+
+```python
+from pydantic import BaseModel, ConfigDict, HttpUrl, field_validator
+
+
+class TriggerConfig(BaseModel):
+    endpoint: HttpUrl
+    secret: str
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("secret")
+    @classmethod
+    def ensure_secret_prefix(cls, value: str) -> str:
+        if not value.startswith("pulse_"):
+            raise ValueError("secret must start with pulse_")
+        return value
+```
+
+**Rules:**
+- Always set `extra="forbid"` to catch unexpected fields
+- Use `@field_validator` and `@model_validator` for domain rules
+- Prefer modern type annotations (`list[str]` not `List[str]`)
+
+## Typing and Class Layout
+
+```python
+from datetime import datetime
+
+
+class WorkflowRunner:
+    tenant_id: str
+    workflow_id: str
+    started_at: datetime
+
+    def __init__(
+        self,
+        tenant_id: str,
+        workflow_id: str,
+        started_at: datetime,
+    ) -> None:
+        self.tenant_id = tenant_id
+        self.workflow_id = workflow_id
+        self.started_at = started_at
+```
+
+**Rules:**
+- Declare member variables at the top of the class body
+- Add type annotations to all function signatures
+- Avoid `Any` unless there is a strong reason
+- Use `list[str]`, `dict[str, int]` (modern forms, not `List`, `Dict`)
+
+## Storage and External I/O
+
+### Blob Storage
+
+```python
+from extensions.ext_storage import storage
+
+# Write
+storage.save(filename="uploads/doc.pdf", data=file_bytes)
+
+# Read
+data = storage.load(filename="uploads/doc.pdf")
+```
+
+### Outbound HTTP
+
+Always use the SSRF proxy for outbound requests:
+
+```python
+from core.helper import ssrf_proxy
+
+response = ssrf_proxy.get(
+    url="https://api.example.com/data",
+    headers={"Authorization": f"Bearer {token}"},
+    timeout=30,
+)
+```
+
+Never use `requests.get()` or `httpx.get()` directly.
+
+## General Rules
+
+- Keep files under 800 lines; split when necessary
+- Keep lines under 120 characters
+- Use `snake_case` for variables/functions, `PascalCase` for classes
+- Use `UPPER_CASE` for constants
+- Prefer simple functions over small utility classes
+- Reuse existing helpers in `core/`, `services/`, and `libs/`
+- Never start long-running services during development work
+- Run `ruff check --fix`, `basedpyright`, and `pytest` before every commit
+
+## Next Steps
+
+- [Frontend Patterns](/docs/contributing/frontend-patterns) -- if also working on the UI
+- [Testing Guide](/docs/contributing/testing-guide) -- how to write effective tests
+- [Database & Migrations](/docs/contributing/database-and-migrations) -- SQLAlchemy patterns
+- [Celery & Async](/docs/contributing/celery-and-async) -- background task patterns

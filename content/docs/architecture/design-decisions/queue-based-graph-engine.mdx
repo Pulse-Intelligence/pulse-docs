@@ -1,0 +1,186 @@
+---
+title: "ADR-001: Queue-Based Graph Engine"
+description: "Pulse workflows are directed acyclic graphs (DAGs) where each node performs"
+---
+
+## Context
+
+Pulse workflows are directed acyclic graphs (DAGs) where each node performs
+an operation (LLM call, HTTP request, code execution, branching logic). The
+engine that executes these graphs must handle:
+
+1. **Parallel execution**: Independent branches of the DAG should run
+   concurrently. A workflow with an IF/ELSE that splits into two branches
+   should not serialize the branches.
+
+2. **Dynamic scaling**: Different workflows have different parallelism needs.
+   A simple linear chain needs one worker; a workflow with 10 parallel
+   branches needs many.
+
+3. **External control**: Running workflows must support stop, pause, and
+   resume commands from users or the system.
+
+4. **Event-driven output**: Results must stream back to the caller as
+   nodes complete, not only when the entire workflow finishes.
+
+5. **Extensibility**: The engine must support plugins (layers) that hook
+   into node execution without modifying the core engine.
+
+The original engine used sequential execution: nodes were visited in
+topological order, one at a time, in a single thread.
+
+## Decision
+
+Replace the sequential executor with a **queue-based graph engine** that
+uses a ready queue and a dynamic thread pool:
+
+```
++-------------+     +-----------+     +--------+     +-------------+
+|  ReadyQueue |---->|  Worker   |---->| Node   |---->| EventQueue  |
+| (nodes that |     |  Pool     |     | .run() |     | (completion |
+|  can run)   |     | (threads) |     |        |     |  events)    |
++------+------+     +-----------+     +--------+     +------+------+
+       ^                                                     |
+       |                                                     |
+       +------------- EdgeProcessor / StateManager ----------+
+                    (determines next ready nodes)
+```
+
+### Key Components
+
+1. **ReadyQueue**: Thread-safe queue of nodes whose dependencies are all
+   satisfied. Populated at start with the Start node, then updated as nodes
+   complete.
+
+2. **WorkerPool**: Dynamic pool of worker threads that consume from the
+   ReadyQueue. Scales between `min_workers` (default 1) and `max_workers`
+   (default 10) based on queue depth.
+
+3. **EventQueue**: Nodes emit completion events that the Dispatcher processes
+   to update graph state and enqueue newly ready nodes.
+
+4. **CommandProcessor**: Polls a CommandChannel for external commands
+   (abort, pause, update variables) and applies them to the execution state.
+
+5. **GraphEngineLayer**: Extension point for cross-cutting concerns
+   (observability, rate limiting) that hooks into before/after node execution.
+
+### Execution Flow
+
+```
+1. Seed ReadyQueue with root nodes (Start, Trigger)
+2. Workers pull nodes and execute them
+3. Completion events flow to EventQueue
+4. Dispatcher processes events:
+   a. Update node state to "completed"
+   b. EdgeProcessor finds successor nodes
+   c. StateManager checks if successors' dependencies are met
+   d. Enqueue ready successors to ReadyQueue
+5. Repeat until ReadyQueue is empty and all workers are idle
+6. Yield final GraphRunSucceeded/Failed/Paused event
+```
+
+## Consequences
+
+### Positive
+
+- **Parallel execution**: Independent branches naturally run in parallel.
+  A workflow with two branches after an IF/ELSE runs both branches
+  concurrently, cutting wall-clock time roughly in half.
+
+- **Dynamic resource usage**: The worker pool scales up when many nodes are
+  ready and scales down when idle, avoiding wasted threads for simple
+  workflows.
+
+- **Clean separation of concerns**: The engine is decomposed into small,
+  testable subsystems (WorkerPool, EdgeProcessor, StateManager,
+  CommandProcessor, EventManager).
+
+- **Extensibility via layers**: The ObservabilityLayer adds OpenTelemetry
+  tracing without any changes to the core engine. New layers can be added
+  for logging, rate limiting, or custom metrics.
+
+- **External control**: The CommandChannel abstraction enables stop/pause
+  commands from both in-process callers and distributed Redis channels.
+
+### Negative
+
+- **Thread safety complexity**: Shared state (ReadyQueue, VariablePool,
+  node states) requires careful synchronization. The StateManager uses
+  locks to prevent race conditions.
+
+- **Debugging difficulty**: Non-deterministic execution order makes
+  reproducing issues harder than with sequential execution.
+
+- **Resource overhead**: Each worker thread consumes memory and potentially
+  a database connection. Misconfigured `max_workers` relative to
+  `SQLALCHEMY_POOL_SIZE` can exhaust the connection pool.
+
+- **Increased code complexity**: The engine has more moving parts than the
+  sequential executor (ReadyQueue, WorkerPool, EventQueue, Dispatcher,
+  CommandProcessor).
+
+### Neutral
+
+- **Backward compatibility**: All existing workflows continue to work.
+  Linear workflows simply have one node in the ReadyQueue at a time.
+
+- **Testing**: Unit tests can use `min_workers=1, max_workers=1` to get
+  deterministic execution order when needed.
+
+## Alternatives Considered
+
+### Alternative 1: Sequential Execution (Status Quo)
+
+Execute nodes one at a time in topological order.
+
+- **Pros**: Simple, deterministic, easy to debug
+- **Cons**: Cannot parallelize branches, slow for complex DAGs, no
+  dynamic scaling
+- **Rejected because**: User workflows with parallel branches showed
+  2-5x worse wall-clock time
+
+### Alternative 2: asyncio Event Loop
+
+Use Python's asyncio with coroutines for concurrent execution.
+
+- **Pros**: Lower overhead than threads, no GIL contention for I/O
+- **Cons**: Requires all node implementations to be async, major refactor
+  of existing sync code (SQLAlchemy, file I/O), complex error handling
+- **Rejected because**: The codebase is heavily synchronous (Flask,
+  SQLAlchemy sessions). Migrating to async would require rewriting most
+  of the data access layer.
+
+### Alternative 3: Process Pool (multiprocessing)
+
+Use separate processes instead of threads.
+
+- **Pros**: True parallelism, no GIL, process isolation
+- **Cons**: High overhead for process creation, complex IPC for shared
+  state (VariablePool), serialization costs for large data
+- **Rejected because**: Most workflow nodes are I/O-bound (waiting for
+  LLM APIs, database queries), so threads are sufficient. The shared
+  VariablePool would need expensive serialization across processes.
+
+### Alternative 4: Celery Task Graph
+
+Model each node as a Celery task with chord/chain primitives.
+
+- **Pros**: Built-in distributed execution, retry logic, monitoring
+- **Cons**: High latency per node (task serialization + broker round-trip),
+  loss of fine-grained control over execution order, complex error
+  recovery for partial DAG failures
+- **Rejected because**: The per-node overhead of Celery task dispatch
+  (10-50ms) is unacceptable for workflows with many small nodes. The
+  graph engine needs sub-millisecond dispatch for conditional branching.
+
+---
+
+## Cross-References
+
+- [10 Storage and Data Flow](/docs/architecture/storage-and-data-flow) -- Variable Pool
+  that the engine reads and writes
+- [11 Performance and Scaling](/docs/architecture/performance-and-scaling) -- worker pool
+  tuning guidelines
+- [ADR-005: Command Channel Pattern](/docs/architecture/design-decisions/command-channel-pattern) --
+  how external commands reach the engine

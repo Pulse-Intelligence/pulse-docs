@@ -1,0 +1,589 @@
+---
+title: "Node Reference"
+description: "This chapter covers all 29 node types available in Pulse workflows."
+---
+
+This chapter covers all 29 node types available in Pulse workflows.
+Nodes are grouped by purpose so you can quickly find what you need.
+
+---
+
+## Table of Contents
+
+1. [Entry Points](#entry-points)
+2. [AI and LLM Nodes](#ai-and-llm-nodes)
+3. [Data Nodes](#data-nodes)
+4. [Logic Nodes](#logic-nodes)
+5. [Flow Control Nodes](#flow-control-nodes)
+6. [Output Nodes](#output-nodes)
+
+---
+
+## Entry Points
+
+Entry point nodes are where workflows begin. Every workflow must have
+exactly one entry point.
+
+### Start
+
+**What it does**: Receives the initial input when a user triggers the
+workflow. In chatbots, this is the user's message. In standalone
+workflows, this can be form fields you define.
+
+**When to use it**: Every chatbot and workflow uses a Start node. It is
+added automatically when you create a workflow.
+
+**Key settings**:
+- Input fields -- define what information the workflow needs at the
+  beginning (text fields, number fields, file uploads, dropdown
+  selections)
+- System variables -- automatically available values like the user's
+  ID, conversation ID, and uploaded files
+
+**Common pitfall**: Forgetting to reference the Start node's variables
+in downstream nodes. If your LLM node's prompt does not include
+`{{#start.query#}}`, it will not know what the user asked.
+
+---
+
+### Trigger: Webhook
+
+**What it does**: Starts the workflow when an external system sends a
+message to a special URL. For example, when a form is submitted on
+your website, or when a payment is processed by your billing system.
+
+**When to use it**: Automation workflows triggered by external events.
+
+**Key settings**:
+- Webhook URL -- the address external systems send data to (generated
+  automatically)
+- Authentication -- optional security to verify the sender
+- Request format -- what data the webhook expects
+
+**Common pitfall**: Forgetting to configure the sending system to use
+the correct webhook URL. Test with the debug panel's "trigger test"
+feature first.
+
+---
+
+### Trigger: Schedule
+
+**What it does**: Starts the workflow automatically at set times. Like
+an alarm clock for your workflow.
+
+**When to use it**: Recurring tasks like daily reports, weekly data
+processing, or hourly monitoring.
+
+**Key settings**:
+- Frequency -- how often (every hour, daily, weekly, monthly)
+- Time -- when to run
+- Timezone -- which timezone the schedule uses
+
+**Common pitfall**: Setting a schedule that runs too frequently without
+considering the cost of AI model calls. A workflow that runs every
+minute and calls GPT-4 will accumulate costs quickly.
+
+---
+
+### Trigger: Plugin
+
+**What it does**: Starts the workflow when a specific plugin event
+occurs. This depends on which plugins are installed in your workspace.
+
+**When to use it**: When you want workflows to respond to plugin-specific
+events (e.g., a Slack message, a GitHub issue, or a custom integration).
+
+**Key settings**: Varies by plugin.
+
+**Common pitfall**: The plugin must be installed and configured before
+this trigger will work.
+
+---
+
+## AI and LLM Nodes
+
+These nodes interact with AI models to generate text, classify content,
+or extract information.
+
+### LLM
+
+**What it does**: Sends a prompt to an AI model and returns the
+generated text. This is the most commonly used node.
+
+**When to use it**: Whenever you need the AI to generate, summarize,
+translate, classify, or analyze text.
+
+**Key settings**:
+- Model -- which AI model to use
+- System prompt -- instructions for how the AI should behave
+- User prompt -- the specific question or task (usually includes
+  variables from previous nodes)
+- Temperature -- how creative vs. predictable the output should be
+  (0 = very predictable, 1 = very creative)
+- Max tokens -- the maximum length of the response
+- Memory -- whether to include conversation history (for chatbot
+  workflows)
+
+**Common pitfall**: Writing vague prompts. Be specific about what you
+want the AI to produce, including format, length, and constraints.
+
+---
+
+### Agent
+
+**What it does**: An AI that can autonomously decide which tools to use
+and in what order. Unlike a regular LLM node where you define the
+steps, an Agent node figures out the steps on its own.
+
+**When to use it**: Complex tasks where the AI needs to decide what
+actions to take -- like researching a topic (search, read, summarize)
+or processing a request that requires multiple tool calls.
+
+**Key settings**:
+- Model -- which AI model drives the agent
+- Tools -- which tools the agent can use (web search, calculator,
+  API calls, etc.)
+- Instructions -- guidelines for how the agent should approach tasks
+- Max iterations -- how many tool-use steps the agent can take
+
+**Common pitfall**: Giving the agent too many tools. Start with a small
+set of relevant tools and add more as needed. Too many options can
+confuse the AI.
+
+---
+
+### Question Classifier
+
+**What it does**: Sorts a user's message into predefined categories.
+You define the categories, and the AI determines which one the message
+belongs to. Each category becomes a separate output path.
+
+**When to use it**: Routing logic -- when different types of questions
+should be handled differently (e.g., billing questions go to one path,
+technical questions go to another).
+
+**Key settings**:
+- Categories -- the list of possible classifications (e.g., "billing",
+  "technical", "general")
+- Model -- which AI model to use for classification
+- Instructions -- additional context to help classify accurately
+
+**Common pitfall**: Creating too many categories with overlapping
+definitions. Keep categories distinct and well-defined.
+
+---
+
+### Parameter Extractor
+
+**What it does**: Pulls specific pieces of information out of text.
+For example, extracting a person's name, email address, or order number
+from a message.
+
+**When to use it**: When you need structured data from unstructured text.
+For example, extracting shipping details from a customer email.
+
+**Key settings**:
+- Parameters to extract -- define what you want (name, type, description)
+- Model -- which AI model to use
+- Source text -- the text to extract from (usually a variable from a
+  previous node)
+
+**Common pitfall**: Not providing examples of expected formats. If you
+want a phone number, specify the expected format (e.g., "(555) 123-4567").
+
+---
+
+## Data Nodes
+
+These nodes work with your data -- searching knowledge bases, extracting
+text from documents, and connecting to data sources.
+
+### Knowledge Retrieval
+
+**What it does**: Searches through a knowledge base to find information
+relevant to a query. Returns the most relevant passages from your
+documents.
+
+**When to use it**: Whenever you want the AI to answer questions using
+your own documents (this is the core of RAG -- using your data to
+improve AI answers).
+
+**Key settings**:
+- Knowledge base -- which knowledge base to search
+- Query -- what to search for (usually the user's question)
+- Top K -- how many results to return (3-5 is typical)
+- Retrieval method -- how to search (keyword, semantic, or hybrid)
+- Score threshold -- minimum relevance score to include a result
+- Reranking -- optionally re-order results for better relevance
+
+**Common pitfall**: Setting Top K too high floods the AI with context,
+making it harder to generate focused answers. Setting it too low may
+miss relevant information. Start with 3-5 and adjust.
+
+---
+
+### Knowledge Index
+
+**What it does**: Adds new content to an existing knowledge base. This
+lets workflows automatically update your document collections.
+
+**When to use it**: Automated document ingestion -- for example, a
+workflow that receives documents via webhook and adds them to your
+knowledge base.
+
+**Key settings**:
+- Knowledge base -- which knowledge base to add to
+- Content -- the text to index
+- Metadata -- optional labels or categories
+
+**Common pitfall**: Indexing duplicate content. Check whether the
+document already exists before adding it.
+
+---
+
+### Document Extractor
+
+**What it does**: Reads text from uploaded files. Supports PDFs, Word
+documents, spreadsheets, and many other formats.
+
+**When to use it**: When your workflow receives file uploads that need
+to be read and processed.
+
+**Key settings**:
+- File -- the uploaded file to extract text from
+- Format handling -- options for different file types
+
+**Common pitfall**: Very large files may take time to process. Consider
+the file size limits of your deployment.
+
+---
+
+### Datasource
+
+**What it does**: Connects to external data sources to fetch information
+during workflow execution.
+
+**When to use it**: When your workflow needs real-time data from external
+systems.
+
+**Key settings**: Varies by datasource type.
+
+**Common pitfall**: External data sources may be slow or unavailable.
+Plan for error handling.
+
+---
+
+## Logic Nodes
+
+These nodes make decisions, transform data, and interact with external
+services.
+
+### IF/ELSE
+
+**What it does**: Creates a fork in your workflow based on a condition.
+Like a road that splits into two paths -- the workflow takes one path
+or the other depending on a condition you define.
+
+**When to use it**: Any time your workflow needs to make a decision.
+For example: "If the user's question is about billing, do X. Otherwise,
+do Y."
+
+**Key settings**:
+- Conditions -- what to check (variable equals a value, contains text,
+  is empty, is greater than, etc.)
+- Multiple conditions -- you can combine conditions with AND/OR logic
+- Multiple branches -- you can add more than two branches (IF / ELIF /
+  ELSE)
+
+**Common pitfall**: Not accounting for edge cases. Always have an ELSE
+branch as a fallback for unexpected inputs.
+
+---
+
+### Code
+
+**What it does**: Runs custom code (Python or JavaScript) to process
+data in ways that other nodes cannot. The code runs in a secure sandbox
+that cannot access external systems.
+
+**When to use it**: Data transformations that require custom logic --
+for example, reformatting dates, calculating scores, or parsing
+structured text.
+
+**Key settings**:
+- Language -- Python or JavaScript
+- Code -- the code to run
+- Input variables -- data to pass into the code
+- Output variables -- data the code produces
+
+**Common pitfall**: The code sandbox has no internet access and limited
+libraries. It is designed for data transformation, not for calling
+external services (use the HTTP Request node for that).
+
+---
+
+### Template Transform
+
+**What it does**: Fills in a text template with values from variables.
+Like a mail merge -- you write a template with placeholders, and the
+node replaces them with actual values.
+
+**When to use it**: Formatting output text, building structured messages,
+or assembling data from multiple sources into a single text.
+
+**Key settings**:
+- Template -- the text template with variable placeholders
+- Variables -- the values to insert
+
+**Common pitfall**: Mismatched variable names between the template and
+the available variables. Double-check your variable references.
+
+---
+
+### HTTP Request
+
+**What it does**: Sends a request to an external web service and returns
+the response. This is how workflows interact with the outside world
+(other than AI models).
+
+**When to use it**: Calling external APIs -- for example, sending a
+Slack message, creating a ticket in Jira, fetching data from a CRM,
+or posting to a webhook.
+
+**Key settings**:
+- URL -- the web address to call
+- Method -- GET (fetch data), POST (send data), PUT (update data),
+  DELETE (remove data)
+- Headers -- extra information sent with the request (often includes
+  authentication)
+- Body -- data to send (for POST and PUT requests)
+- Timeout -- how long to wait for a response
+
+**Common pitfall**: External API calls go through the SSRF proxy, which
+blocks requests to private/internal network addresses. This is a
+security feature. If your API is on a private network, talk to your
+administrator.
+
+---
+
+### Tool
+
+**What it does**: Uses a pre-configured tool from your workspace's tool
+library. Tools are reusable connectors to external services (like a
+web search tool, a calculator, or a custom API integration).
+
+**When to use it**: When a tool has already been set up for the action
+you need. Using a Tool node is easier than configuring an HTTP Request
+from scratch.
+
+**Key settings**:
+- Tool -- which tool to use (selected from a list)
+- Parameters -- inputs required by the tool
+
+**Common pitfall**: The tool must be installed and configured in your
+workspace before it appears in the list.
+
+---
+
+## Flow Control Nodes
+
+These nodes control the flow of execution -- looping, waiting, and
+aggregating data.
+
+### Iteration
+
+**What it does**: Repeats a set of steps for each item in a list. Like
+a "for each" loop -- if you have a list of 10 items, the steps inside
+the Iteration node run 10 times, once for each item.
+
+**When to use it**: Processing lists of items -- for example, analyzing
+each paragraph of a document, processing each row of a spreadsheet,
+or generating summaries for each item in a list.
+
+**Key settings**:
+- Input list -- the list to iterate over
+- Contained nodes -- the steps to repeat for each item
+- Parallel execution -- whether items can be processed simultaneously
+
+**Common pitfall**: Long lists with AI calls inside the loop can be
+slow and expensive. Consider whether you can batch process instead.
+
+---
+
+### Loop
+
+**What it does**: Repeats a set of steps until a condition is met. Unlike
+Iteration (which goes through a list), Loop repeats until something
+specific happens.
+
+**When to use it**: Retry logic (keep trying until it works), iterative
+refinement (keep improving until quality is good enough), or polling
+(keep checking until data is available).
+
+**Key settings**:
+- Exit condition -- when to stop looping
+- Max iterations -- safety limit to prevent infinite loops
+- Contained nodes -- the steps to repeat
+
+**Common pitfall**: Forgetting to set a maximum iteration limit. Without
+one, a bad exit condition could cause the workflow to run forever.
+
+---
+
+### Variable Aggregator
+
+**What it does**: Collects outputs from multiple upstream paths into a
+single value. When your workflow has branches (like after an IF/ELSE),
+this node merges the results back together.
+
+**When to use it**: After branching logic, when you need to combine
+results from different paths into one downstream node.
+
+**Key settings**:
+- Input variables -- which variables to aggregate
+- Aggregation method -- how to combine them
+
+**Common pitfall**: Only one branch will have actually executed (in an
+IF/ELSE scenario). The aggregator handles this by taking whichever
+value is available.
+
+---
+
+### Variable Assigner
+
+**What it does**: Sets the value of a conversation variable. Conversation
+variables persist across chat turns, so this lets your workflow
+"remember" things between messages.
+
+**When to use it**: Storing information for later turns -- for example,
+saving the user's name after they provide it, so you can use it in
+future responses.
+
+**Key settings**:
+- Variable -- which conversation variable to set
+- Value -- what to set it to
+
+**Common pitfall**: This node only works in chatbot workflows (Advanced
+Chat mode), not in standalone workflows.
+
+---
+
+### List Operator
+
+**What it does**: Performs operations on lists of data -- sorting,
+filtering, slicing, deduplicating, or extracting specific items.
+
+**When to use it**: When you need to manipulate a list before processing
+it. For example, taking only the top 3 search results, removing
+duplicates, or sorting by relevance.
+
+**Key settings**:
+- Input list -- the list to operate on
+- Operation -- what to do (sort, filter, slice, etc.)
+- Parameters -- details of the operation (sort key, filter criteria,
+  slice range)
+
+**Common pitfall**: Make sure the list is not empty before applying
+operations. An empty list can cause unexpected behavior in downstream
+nodes.
+
+---
+
+### Human Input
+
+**What it does**: Pauses the workflow and waits for a person to provide
+input. The workflow shows a form, waits for the person to fill it in,
+and then continues with the provided values.
+
+**When to use it**: Approval workflows (a manager must approve before
+proceeding), clarification steps (ask the user for more details), or
+quality checkpoints (a human reviews AI output before it is sent).
+
+**Key settings**:
+- Input fields -- what information to collect from the person
+- Timeout -- how long to wait before timing out
+- Instructions -- what to tell the person about what is needed
+
+**Common pitfall**: The workflow stays paused until someone responds.
+Make sure the right people are notified that their input is needed.
+
+---
+
+## Output Nodes
+
+These nodes deliver the final result of the workflow.
+
+### Answer
+
+**What it does**: Sends a response back to the user in a chatbot
+workflow. This is how the AI's answer reaches the user in real time.
+
+**When to use it**: In chatbot workflows (Advanced Chat mode) as the
+final step of each branch.
+
+**Key settings**:
+- Response content -- the text to send (usually a variable from an
+  LLM node)
+- Streaming -- whether to show the response word by word as it is
+  generated, or all at once
+
+**Common pitfall**: Make sure every possible path in your workflow ends
+with an Answer node. If a branch has no Answer node, the user will get
+no response when that branch executes.
+
+---
+
+### End
+
+**What it does**: Marks the end of a standalone workflow (not a chatbot).
+Declares what the workflow's final output values are.
+
+**When to use it**: In standalone Workflow mode apps as the final node.
+Also used in Completion mode apps.
+
+**Key settings**:
+- Output variables -- which variables to include in the final result
+
+**Common pitfall**: In chatbot workflows, use the Answer node instead.
+The End node is for workflows that produce data rather than chat
+responses.
+
+---
+
+## Quick Reference Table
+
+| Node | Category | One-Line Summary |
+|------|----------|-----------------|
+| Start | Entry | Receives initial workflow input |
+| Trigger: Webhook | Entry | Starts when an external system sends data |
+| Trigger: Schedule | Entry | Starts automatically on a time schedule |
+| Trigger: Plugin | Entry | Starts on a plugin-specific event |
+| LLM | AI | Sends a prompt to an AI model |
+| Agent | AI | AI that autonomously chooses and uses tools |
+| Question Classifier | AI | Sorts messages into categories |
+| Parameter Extractor | AI | Extracts structured data from text |
+| Knowledge Retrieval | Data | Searches a knowledge base |
+| Knowledge Index | Data | Adds content to a knowledge base |
+| Document Extractor | Data | Reads text from uploaded files |
+| Datasource | Data | Connects to external data sources |
+| IF/ELSE | Logic | Makes decisions based on conditions |
+| Code | Logic | Runs custom code in a sandbox |
+| Template Transform | Logic | Fills in text templates with values |
+| HTTP Request | Logic | Calls external web services |
+| Tool | Logic | Uses pre-configured tools |
+| Iteration | Flow | Loops over a list of items |
+| Loop | Flow | Repeats until a condition is met |
+| Variable Aggregator | Flow | Merges outputs from multiple branches |
+| Variable Assigner | Flow | Sets conversation variables |
+| List Operator | Flow | Sorts, filters, and manipulates lists |
+| Human Input | Flow | Pauses for human input |
+| Answer | Output | Sends response in chatbot workflows |
+| End | Output | Marks the end of standalone workflows |
+
+---
+
+## Next Steps
+
+- **Add a knowledge base**: See [Knowledge Bases](/docs/user-guide/knowledge-bases)
+- **Choose the right app mode**: See [App Modes](/docs/user-guide/app-modes)
+- **Build something specific**: See [Recipes](/docs/user-guide/recipes)

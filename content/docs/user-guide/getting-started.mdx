@@ -1,0 +1,244 @@
+---
+title: "Getting Started"
+description: "This chapter walks you through getting access to Pulse, setting up your"
+---
+
+This chapter walks you through getting access to Pulse, setting up your
+account, navigating the dashboard, and configuring your first AI model
+provider.
+
+---
+
+## Table of Contents
+
+1. [Getting Access to Pulse](#getting-access-to-pulse)
+2. [Account Setup](#account-setup)
+3. [Workspace Basics](#workspace-basics)
+4. [Dashboard Navigation](#dashboard-navigation)
+5. [Configuring Your First Model Provider](#configuring-your-first-model-provider)
+
+---
+
+## Getting Access to Pulse
+
+There are three ways to start using Pulse:
+
+### Option 1: Ask Your Admin (Recommended for Teams)
+
+If your organization already has Pulse running:
+
+1. Ask your team administrator for an invitation.
+2. You will receive an email with a link to join the workspace.
+3. Click the link, create your password, and you are in.
+
+### Option 2: Self-Hosted with Docker (For Technical Users)
+
+If you want to run Pulse on your own server:
+
+1. Make sure you have Docker and Docker Compose installed on your machine.
+2. Clone the Pulse repository.
+3. Run the Docker Compose setup -- this starts all the services Pulse
+   needs (the application, the database, and supporting tools).
+4. Open your browser and navigate to the local address (typically
+   `http://localhost`).
+5. Follow the on-screen setup wizard to create your admin account.
+
+> If you need help with Docker setup, ask an engineer on your team or
+> refer to the [Contributing Guide](/docs/contributing/getting-started).
+
+### Option 3: Cloud Hosting
+
+Some cloud providers offer managed Pulse hosting. Check with your IT team
+to see if a hosted option is available for your organization.
+
+---
+
+## Account Setup
+
+### Creating Your Account
+
+When you first open Pulse (whether from an invitation link or a fresh
+install), you will see a setup page:
+
+1. **Enter your email address** -- this will be your login ID.
+2. **Choose a password** -- pick something strong (at least 8 characters,
+   mix of letters and numbers).
+3. **Enter your name** -- this is how you will appear to other team
+   members.
+4. **Click "Create Account"** or "Sign Up."
+
+### Signing In
+
+After creating your account:
+
+1. Go to your Pulse URL.
+2. Enter your email and password.
+3. Click "Sign In."
+
+You will be taken to the dashboard.
+
+### Profile Settings
+
+To update your profile:
+
+1. Click your avatar or initials in the bottom-left corner of the
+   dashboard.
+2. Select "Account Settings."
+3. Here you can:
+   - Change your display name
+   - Update your password
+   - Set your preferred language
+   - Configure notification preferences
+
+---
+
+## Workspace Basics
+
+### What Is a Workspace?
+
+A workspace is your team's shared environment in Pulse. Everything you
+build -- apps, knowledge bases, model configurations -- lives inside
+your workspace.
+
+Think of a workspace like a shared folder: everyone on the team can see
+and work with the contents, but people outside the team cannot.
+
+### Switching Workspaces
+
+If you belong to multiple workspaces:
+
+1. Click the workspace name in the top-left corner of the dashboard.
+2. A dropdown will show all workspaces you belong to.
+3. Click the one you want to switch to.
+
+### Inviting Team Members
+
+If you are an Owner or Admin:
+
+1. Go to "Settings" (gear icon in the sidebar).
+2. Click "Members."
+3. Click "Invite Member."
+4. Enter their email address and choose their role:
+   - **Admin** -- can manage settings and members
+   - **Editor** -- can create and edit apps
+   - **Normal** -- can view and use apps
+   - **Dataset Operator** -- can manage knowledge bases only
+5. Click "Send Invitation."
+
+They will receive an email with a link to join.
+
+---
+
+## Dashboard Navigation
+
+When you sign in, you land on the dashboard. Here is what you will see:
+
+### Sidebar (Left Side)
+
+The sidebar is your main navigation:
+
+| Section       | What It Contains                             |
+| ------------- | -------------------------------------------- |
+| **Apps**      | All your apps (chatbots, workflows, etc.)    |
+| **Knowledge** | Your knowledge bases (document collections)  |
+| **Plugins**   | Installed plugins and the plugin marketplace |
+| **Tools**     | Custom tools available to your workflows     |
+
+### Top Bar
+
+The top bar shows:
+
+- **Workspace name** -- click to switch workspaces
+- **Search** -- find apps, knowledge bases, or settings quickly
+- **Notifications** -- alerts about shared resources or system events
+
+### Main Area
+
+The main area changes based on what you select in the sidebar:
+
+- **Apps view**: Shows a grid or list of all your apps. Each app card
+  shows its name, type, and last modified date.
+- **Knowledge view**: Shows your knowledge bases with document counts
+  and status.
+- **Settings**: Workspace configuration, member management, model
+  providers.
+
+### Creating Your First App
+
+From the Apps view:
+
+1. Click the "Create App" button (usually in the top-right corner).
+2. Choose an app type:
+   - **Chatbot** -- for conversational apps
+   - **Workflow** -- for automation pipelines
+   - **Agent** -- for autonomous AI assistants
+3. Give your app a name and optional description.
+4. Click "Create."
+
+You will be taken to the app editor where you can configure your app.
+
+---
+
+## Configuring Your First Model Provider
+
+Before you can build anything useful, you need to connect Pulse to an
+AI model provider. This is like giving Pulse the keys to an AI service.
+
+### What Is a Model Provider?
+
+A model provider is a company that runs AI models and lets you use them
+through an API (a way for software to talk to other software). Common
+providers include:
+
+| Provider  | Popular Models            | Best Known For                    |
+| --------- | ------------------------- | --------------------------------- |
+| OpenAI    | GPT-4, GPT-4o             | General-purpose AI, widely used   |
+| Anthropic | Claude 3.5, Claude 3 Opus | Long documents, careful reasoning |
+| Google    | Gemini Pro, Gemini Ultra  | Multimodal (text + images)        |
+| Mistral   | Mistral Large, Mixtral    | Open-source models, fast          |
+| Meta      | Llama 3                   | Open-source, self-hostable        |
+
+### Getting an API Key
+
+Before connecting a provider, you need an API key from them:
+
+1. Go to the provider's website (e.g., platform.openai.com).
+2. Create an account if you do not have one.
+3. Navigate to "API Keys" or "Credentials."
+4. Generate a new API key.
+5. Copy the key -- you will need it in the next step.
+
+> **Important**: Treat your API key like a password. Do not share it
+> publicly or paste it into documents. Pulse encrypts your key when you
+> save it.
+
+### Adding a Provider to Pulse
+
+1. Go to "Settings" in the sidebar.
+2. Click "Model Providers."
+3. You will see a list of supported providers. Find the one you want and
+   click "Set Up."
+4. Paste your API key into the field.
+5. Click "Save."
+
+Pulse will verify your key by making a small test request. If everything
+works, you will see a green checkmark.
+
+### Verifying It Works
+
+After adding a provider:
+
+1. Go back to "Settings" > "Model Providers."
+2. Click on the provider you just added.
+3. You should see a list of available models with green status indicators.
+
+If any model shows a red status, your API key may not have access to
+that specific model. Check your provider's billing and access settings.
+
+---
+
+## Next Steps
+
+Now that you have an account and a model provider connected, you are
+ready to build your first chatbot. Continue to
+[Building Your First Chatbot](/docs/user-guide/building-your-first-chatbot).

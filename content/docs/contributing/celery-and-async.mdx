@@ -1,0 +1,321 @@
+---
+title: "Celery and Async Tasks"
+description: "Backend engineers"
+---
+
+This guide covers how to write Celery tasks, choose the right queue, test
+tasks, and start workers in Pulse.
+
+## When to Use Celery
+
+Use Celery for work that should not block an HTTP request:
+
+| Use Case | Why Async |
+|----------|-----------|
+| Document indexing | Takes minutes for large documents |
+| Workflow execution | Can run for extended periods |
+| Email sending | External service, may be slow |
+| Data cleanup | Batch operations on many rows |
+| Plugin operations | External daemon communication |
+| Vector store operations | Embedding and indexing |
+| File processing | Large file uploads and transforms |
+
+## Queue Architecture
+
+Pulse uses 14+ dedicated queues to isolate different workload types:
+
+| Queue | Purpose | Typical Tasks |
+|-------|---------|---------------|
+| `dataset` | Document processing | Indexing, chunking, embedding |
+| `priority_dataset` | High-priority document ops | Priority re-indexing |
+| `pipeline` | RAG pipeline execution | Pipeline runs |
+| `priority_pipeline` | High-priority pipeline ops | Priority pipeline runs |
+| `workflow` | Workflow execution | Workflow runs |
+| `conversation` | Conversation processing | Message handling |
+| `mail` | Email delivery | Notifications, invites |
+| `ops_trace` | Observability traces | Trace export |
+| `app_deletion` | App cleanup | Cascading deletes |
+| `plugin` | Plugin operations | Install, upgrade |
+| `workflow_storage` | Workflow data storage | Result persistence |
+| `schedule_poller` | Schedule polling | Cron trigger checking |
+| `schedule_executor` | Schedule execution | Triggered workflow runs |
+| `triggered_workflow_dispatcher` | Trigger dispatching | Webhook/trigger routing |
+| `trigger_refresh_executor` | Trigger refresh | Trigger config reloads |
+
+## Writing a Celery Task
+
+### Task File Structure
+
+Tasks live in `api/tasks/`. Create a new file for each task domain:
+
+```python
+# api/tasks/data_transform_task.py
+import logging
+import time
+
+from celery import shared_task
+
+logger = logging.getLogger(__name__)
+
+
+@shared_task(queue="dataset", bind=True, max_retries=3)
+def run_data_transform(
+    self,
+    tenant_id: str,
+    workflow_id: str,
+    transform_config: dict,
+) -> dict:
+    """Execute a data transform operation asynchronously.
+
+    This task is idempotent -- re-running with the same inputs
+    produces the same result without side effects.
+    """
+    logger.info(
+        "Starting data transform for workflow %s, tenant %s",
+        workflow_id,
+        tenant_id,
+    )
+
+    try:
+        # Import inside task to avoid circular imports
+        from services.workflow_service import WorkflowService
+
+        result = WorkflowService.execute_transform(
+            tenant_id=tenant_id,
+            workflow_id=workflow_id,
+            config=transform_config,
+        )
+
+        logger.info(
+            "Completed data transform for workflow %s",
+            workflow_id,
+        )
+        return {"status": "success", "result_id": result.id}
+
+    except TemporaryError as e:
+        logger.warning(
+            "Temporary failure in data transform for workflow %s: %s",
+            workflow_id,
+            str(e),
+        )
+        # Retry with exponential backoff
+        raise self.retry(exc=e, countdown=2 ** self.request.retries)
+
+    except Exception:
+        logger.error(
+            "Failed data transform for workflow %s, tenant %s",
+            workflow_id,
+            tenant_id,
+            exc_info=True,
+        )
+        raise
+```
+
+### Task Design Rules
+
+1. **Idempotent** -- Re-running the task with the same inputs must be safe.
+   Check for existing results before creating new ones.
+
+2. **Tenant-aware** -- Always accept and log `tenant_id`.
+
+3. **Serializable arguments** -- Task arguments must be JSON-serializable
+   (strings, numbers, dicts, lists). Never pass ORM objects or complex
+   Python objects.
+
+4. **Import inside tasks** -- Import service modules inside the task function
+   to avoid circular imports at module load time.
+
+5. **Log with context** -- Include `tenant_id`, `workflow_id`, and other
+   identifiers in all log messages.
+
+6. **Handle retries** -- Use `bind=True` and `max_retries` for retryable
+   failures. Use exponential backoff.
+
+## Enqueuing Tasks
+
+### From a Service
+
+```python
+# api/services/workflow_service.py
+from tasks.data_transform_task import run_data_transform
+
+
+class WorkflowService:
+    @staticmethod
+    def start_transform(
+        tenant_id: str,
+        workflow_id: str,
+        config: dict,
+    ) -> str:
+        """Start an async data transform. Returns task ID."""
+        task = run_data_transform.delay(
+            tenant_id=tenant_id,
+            workflow_id=workflow_id,
+            transform_config=config,
+        )
+        return task.id
+```
+
+### With Options
+
+```python
+# Specify queue explicitly
+run_data_transform.apply_async(
+    kwargs={
+        "tenant_id": tenant_id,
+        "workflow_id": workflow_id,
+        "transform_config": config,
+    },
+    queue="dataset",
+    countdown=10,  # Delay start by 10 seconds
+)
+```
+
+### Queue Selection Guide
+
+Choose the queue based on the work type:
+
+```
+  Is it document/dataset processing?    -->  dataset (or priority_dataset)
+  Is it a workflow execution?           -->  workflow
+  Is it email?                          -->  mail
+  Is it a plugin operation?             -->  plugin
+  Is it a scheduled trigger?            -->  schedule_executor
+  Is it a webhook/trigger dispatch?     -->  triggered_workflow_dispatcher
+  Is it a conversation operation?       -->  conversation
+  Is it something else?                 -->  Pick the closest match
+```
+
+## Testing Celery Tasks
+
+### Unit Testing (Synchronous)
+
+Test the task logic without Celery overhead:
+
+```python
+# api/tests/unit_tests/tasks/test_data_transform_task.py
+from unittest.mock import patch, MagicMock
+
+from tasks.data_transform_task import run_data_transform
+
+
+class TestRunDataTransform:
+    @patch("tasks.data_transform_task.WorkflowService")
+    def test_successful_transform(self, mock_service):
+        # Arrange
+        mock_result = MagicMock(id="result-123")
+        mock_service.execute_transform.return_value = mock_result
+
+        # Act -- call the task function directly
+        result = run_data_transform(
+            tenant_id="tenant-1",
+            workflow_id="wf-1",
+            transform_config={"type": "map"},
+        )
+
+        # Assert
+        assert result["status"] == "success"
+        assert result["result_id"] == "result-123"
+        mock_service.execute_transform.assert_called_once_with(
+            tenant_id="tenant-1",
+            workflow_id="wf-1",
+            config={"type": "map"},
+        )
+```
+
+### Testing Retry Logic
+
+```python
+import pytest
+from unittest.mock import patch, MagicMock
+
+from tasks.data_transform_task import run_data_transform
+
+
+class TestRetryBehavior:
+    @patch("tasks.data_transform_task.WorkflowService")
+    def test_retries_on_temporary_failure(self, mock_service):
+        mock_service.execute_transform.side_effect = TemporaryError("timeout")
+
+        # Create a mock task instance with retry capability
+        mock_self = MagicMock()
+        mock_self.request.retries = 0
+        mock_self.retry.side_effect = Exception("retried")
+
+        with pytest.raises(Exception, match="retried"):
+            run_data_transform.__wrapped__(
+                mock_self,
+                tenant_id="tenant-1",
+                workflow_id="wf-1",
+                transform_config={},
+            )
+
+        mock_self.retry.assert_called_once()
+```
+
+## Starting Workers
+
+### Development
+
+Start a worker that processes all queues:
+
+```bash
+uv run celery -A app.celery worker \
+  -P threads -c 2 \
+  --loglevel INFO \
+  -Q dataset,priority_dataset,priority_pipeline,pipeline,mail,\
+ops_trace,app_deletion,plugin,workflow_storage,conversation,\
+workflow,schedule_poller,schedule_executor,\
+triggered_workflow_dispatcher,trigger_refresh_executor
+```
+
+### Beat Scheduler
+
+For periodic tasks (schedule polling, cleanup):
+
+```bash
+uv run celery -A app.celery beat
+```
+
+### Monitoring
+
+Watch task execution in real-time:
+
+```bash
+uv run celery -A app.celery events
+```
+
+## Common Patterns
+
+### Chaining Tasks
+
+```python
+from celery import chain
+
+# Execute tasks in sequence
+result = chain(
+    extract_document.s(tenant_id, doc_id),
+    chunk_document.s(),
+    embed_chunks.s(),
+    index_vectors.s(),
+)()
+```
+
+### Task with Timeout
+
+```python
+@shared_task(queue="workflow", bind=True, soft_time_limit=300, time_limit=360)
+def execute_workflow(self, tenant_id: str, workflow_id: str):
+    try:
+        # ... execution logic ...
+        pass
+    except SoftTimeLimitExceeded:
+        logger.warning("Workflow %s soft time limit reached", workflow_id)
+        # Graceful shutdown
+```
+
+## Next Steps
+
+- [Common Mistakes](/docs/contributing/common-mistakes) -- async task pitfalls
+- [Database & Migrations](/docs/contributing/database-and-migrations) -- DB access in tasks
+- [Backend Patterns](/docs/contributing/backend-patterns) -- general backend conventions

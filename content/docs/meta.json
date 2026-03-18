@@ -1,0 +1,13 @@
+{
+  "title": "Documentation",
+  "pages": [
+    "---Getting Started---",
+    "glossary",
+    "---User Guide---",
+    "...user-guide",
+    "---Contributing---",
+    "...contributing",
+    "---Architecture---",
+    "...architecture"
+  ]
+}

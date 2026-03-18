@@ -1,0 +1,313 @@
+---
+title: "Project Structure"
+description: "New engineers"
+---
+
+This document maps the Pulse repository so you know where to find things and
+where to put new code.
+
+## Top-Level Layout
+
+```
+pulse/
+  api/           Backend API (Python, Flask, DDD)
+  web/           Frontend (Next.js 15, React 19, TypeScript)
+  docker/        Docker Compose files and middleware configs
+  docs/          Documentation (you are here)
+  plugins/       Plugin manifests and configurations
+  sdks/          Client SDKs for API consumers
+  scripts/       Build, deploy, and utility scripts
+  terraform/     Infrastructure-as-code for cloud deployment
+  config/        Shared configuration templates
+  dev/           Development-only experimental scripts
+  images/        Static image assets (logos, screenshots)
+  Makefile       Top-level build targets
+  CONTRIBUTING.md  Contribution guidelines
+  AGENTS.md      AI agent development guide
+```
+
+## Backend: `api/`
+
+The backend follows Domain-Driven Design with clear layer separation.
+
+```
+api/
+  app.py                 Application entry point
+  app_factory.py         Flask app factory + extension init
+  celery_entrypoint.py   Celery worker entry point
+  dify_app.py            Custom Flask app subclass
+  commands.py            Flask CLI command definitions
+  configs/               Configuration (Pydantic v2 BaseSettings)
+    app_config.py           Main config class (DifyConfig)
+    deploy/                 Deployment settings
+    feature/                Feature flag settings
+    middleware/              Database, Redis, storage settings
+    observability/           OTEL and logging settings
+  controllers/           HTTP layer (no business logic)
+    console/                Admin console endpoints
+    service_api/            Public API endpoints
+    web/                    Web app endpoints
+    inner_api/              Internal service-to-service API
+    files/                  File upload/download endpoints
+    common/                 Shared controller utilities
+  services/              Business logic layer
+    workflow_service.py     Workflow CRUD and management
+    dataset_service.py      Knowledge base operations
+    app_service.py          App lifecycle management
+    plugin/                 Plugin installation and management
+    trigger/                Trigger processing
+    auth/                   Authentication services
+    errors/                 Domain-specific exception classes
+    entities/               Service-layer DTOs
+  core/                  Domain logic layer
+    workflow/               Workflow engine
+      nodes/                  29 node type implementations
+      enums.py                Node type enum definitions
+    rag/                    RAG pipeline
+      datasource/vdb/         34+ vector store implementations
+      extractor/              Document extractors
+      splitter/               Text chunking strategies
+      embedding/              Embedding providers
+      rerank/                 Reranking strategies
+      retrieval/              Retrieval strategies
+    plugin/                 Plugin runtime
+      entities/               Plugin data models
+      impl/                   Provider adapters (tool, model, etc.)
+    model_runtime/          Model provider abstraction
+    tools/                  Tool management and execution
+    trigger/                Trigger domain logic
+    agent/                  Agent execution engine
+    app/                    App-level domain logic
+    file/                   File handling
+    helper/                 Shared helpers (SSRF proxy, encryption)
+    errors/                 Core-layer exceptions
+  models/                SQLAlchemy ORM models
+    base.py                 Base classes (Base, TypeBase)
+    model.py                App, Conversation, Message models
+    workflow.py             Workflow, WorkflowRun models
+    dataset.py              Dataset, Document models
+    account.py              Account, Tenant models
+    trigger.py              Trigger models
+  repositories/          Data access (used sparingly)
+  extensions/            Flask extensions (23+)
+    ext_database.py         SQLAlchemy / PostgreSQL
+    ext_redis.py            Redis client
+    ext_storage.py          Blob storage
+    ext_celery.py           Celery task queue
+    ext_otel.py             OpenTelemetry tracing
+    ext_blueprints.py       Route registration
+    ext_commands.py         CLI command registration
+    ext_logging.py          Structured logging
+    ext_mail.py             Email sending
+    ext_migrate.py          Alembic migrations
+  tasks/                 Celery background tasks
+  migrations/            Alembic migration scripts
+    versions/               Individual migration files
+  tests/                 Test suites
+    unit_tests/             Unit tests (run locally)
+    integration_tests/      Integration tests (CI only)
+  libs/                  Shared utilities
+  fields/                Pydantic request/response models
+  factories/             Factory functions
+  contexts/              Thread-local context management
+  enums/                 Shared enumerations
+  schedule/              Scheduled job definitions
+  storage/               Storage backend implementations
+  templates/             Email and HTML templates
+```
+
+### Backend Layer Diagram
+
+```
+  HTTP Request
+      |
+      v
+  +------------------+
+  |   Controllers    |   Parse input, call services, return JSON
+  |   (controllers/) |   No business logic allowed here
+  +--------+---------+
+           |
+           v
+  +------------------+
+  |    Services      |   Business logic, tenant scoping, quotas
+  |   (services/)    |   Coordinate core + repos + tasks
+  +--------+---------+
+           |
+           v
+  +------------------+
+  |      Core        |   Domain logic, engines, algorithms
+  |    (core/)       |   Workflow engine, RAG, model runtime
+  +--------+---------+
+           |
+           v
+  +------------------+
+  |  Models / Repos  |   Database access, ORM definitions
+  | (models/, repos/)|   SQLAlchemy, always filtered by tenant_id
+  +------------------+
+```
+
+### Extension Initialization Order
+
+Extensions are loaded sequentially in `app_factory.py`. The order matters
+because some extensions depend on others:
+
+```
+1.  ext_timezone          Timezone configuration
+2.  ext_logging           Structured logging setup
+3.  ext_warnings          Warning filters
+4.  ext_import_modules    Dynamic module loading
+5.  ext_orjson            Fast JSON serialization
+6.  ext_forward_refs      Forward reference resolution
+7.  ext_set_secretkey     Secret key configuration
+8.  ext_compress          Response compression
+9.  ext_code_based_extension  Code extension registry
+10. ext_database          SQLAlchemy + PostgreSQL
+11. ext_app_metrics       Application metrics
+12. ext_migrate           Alembic migrations
+13. ext_redis             Redis client
+14. ext_storage           Blob storage
+15. ext_logstore          Log storage (after storage, before celery)
+16. ext_celery            Celery task queue
+17. ext_login             Authentication
+18. ext_mail              Email
+19. ext_hosting_provider  Hosting configuration
+20. ext_sentry            Error tracking
+21. ext_proxy_fix         Proxy header handling
+22. ext_blueprints        Route registration
+23. ext_commands          CLI commands
+24. ext_otel              OpenTelemetry
+25. ext_request_logging   Request/response logging
+26. ext_session_factory   Session management
+```
+
+## Frontend: `web/`
+
+The frontend uses Next.js 15 with App Router.
+
+```
+web/
+  app/                   Next.js App Router
+    (commonLayout)/        Main app routes (dashboard, apps, datasets)
+      apps/                  App management pages
+      datasets/              Knowledge base pages
+      tools/                 Tool management
+      plugins/               Plugin marketplace
+      explore/               App exploration/discovery
+    (shareLayout)/         Public sharing routes
+    (marketing)/           Marketing/landing pages
+    components/            React components
+      base/                  ~107 design system components
+      app/                   App-specific components
+      workflow/              Workflow builder components
+      datasets/              Dataset management components
+      header/                Navigation header
+      billing/               Billing components
+      plugins/               Plugin components
+      rag-pipeline/          RAG pipeline components
+    layout.tsx             Root layout
+  context/               React context providers
+  hooks/                 Custom React hooks
+  models/                TypeScript type definitions
+  service/               API client layer (ORPC)
+  contract/              ORPC type-safe contracts
+  i18n/                  Internationalization
+    en-US/                 English translations (source of truth)
+    ja-JP/                 Japanese translations
+    zh-Hans/               Simplified Chinese translations
+    ...                    23+ language directories
+  config/                Frontend configuration
+  constants/             Shared constants
+  themes/                Theme definitions
+  test/                  Test utilities and helpers
+  testing/               Testing documentation and specs
+  __mocks__/             Shared mock factories
+  __tests__/             Integration test suites
+  assets/                Static assets (icons, images)
+  public/                Public static files
+  scripts/               Build and analysis scripts
+  vitest.config.ts       Vitest test configuration
+  vitest.setup.ts        Global test setup
+  eslint.config.mjs      ESLint configuration (Antfu)
+  tailwind.config.js     Tailwind CSS configuration
+  tsconfig.json          TypeScript configuration
+  next.config.ts         Next.js configuration
+  package.json           Dependencies and scripts
+```
+
+### Frontend Route Groups
+
+| Route Group | Purpose | Example Routes |
+|-------------|---------|----------------|
+| `(commonLayout)` | Main authenticated app | `/apps`, `/datasets`, `/tools`, `/plugins` |
+| `(shareLayout)` | Public shared resources | Shared app views, embedded widgets |
+| `(marketing)` | Marketing pages | Landing pages, feature showcases |
+
+### State Management Strategy
+
+```
+  +-------------------+
+  |    Zustand        |   Global state (user session, workspace)
+  |    (stores)       |   Shared across the entire app
+  +-------------------+
+
+  +-------------------+
+  |    Jotai          |   Atomic state (UI toggles, local prefs)
+  |    (atoms)        |   Fine-grained reactivity
+  +-------------------+
+
+  +-------------------+
+  |  TanStack Query   |   Server state (API data, caching)
+  |    (queries)      |   Fetch, cache, sync with backend
+  +-------------------+
+```
+
+## Docker: `docker/`
+
+```
+docker/
+  docker-compose.yaml              Full production deployment
+  docker-compose.middleware.yaml   Dev middleware only
+  middleware.env.example           Environment template
+  ssrf_proxy/                      SSRF proxy configuration
+    squid.conf.template              Squid config template
+    docker-entrypoint.sh             Container entrypoint
+  volumes/                         Persistent data (gitignored)
+    sandbox/                         Sandbox dependencies and config
+```
+
+### Middleware Services
+
+| Service | Image | Port | Purpose |
+|---------|-------|------|---------|
+| Weaviate | `semitechnologies/weaviate:1.27.0` | 8080 | Vector store |
+| SSRF Proxy | `ubuntu/squid:latest` | 3128 | Outbound HTTP filtering |
+| Sandbox | `langgenius/dify-sandbox:0.2.12` | 8194 | Code execution |
+| Plugin Daemon | `langgenius/dify-plugin-daemon:0.5.2-local` | 5002, 5003 | Plugin runtime |
+
+PostgreSQL and Redis are expected to run on the host or be configured
+externally.
+
+## Where to Put New Code
+
+| What you are adding | Where it goes |
+|--------------------|---------------|
+| New API endpoint | `api/controllers/<area>/` |
+| Business logic | `api/services/` |
+| Domain algorithm | `api/core/<domain>/` |
+| Database model | `api/models/` |
+| Background task | `api/tasks/` |
+| Configuration setting | `api/configs/<category>/` |
+| Flask extension | `api/extensions/` |
+| React component | `web/app/components/<area>/` |
+| API client function | `web/service/` |
+| TypeScript type | `web/models/` |
+| Translation string | `web/i18n/en-US/` |
+| Custom hook | `web/hooks/` |
+| Context provider | `web/context/` |
+| Docker service | `docker/docker-compose.middleware.yaml` |
+
+## Next Steps
+
+- [First Contribution](/docs/contributing/first-contribution) -- learn the workflow
+- [Backend Patterns](/docs/contributing/backend-patterns) -- backend coding conventions
+- [Frontend Patterns](/docs/contributing/frontend-patterns) -- frontend coding conventions

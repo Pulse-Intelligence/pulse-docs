@@ -1,0 +1,226 @@
+---
+title: "Model Configuration"
+description: "This chapter explains how to set up and manage AI models in Pulse. Models"
+---
+
+This chapter explains how to set up and manage AI models in Pulse. Models
+are the AI "brains" that power your apps. Choosing the right model and
+configuring it properly has a big impact on quality, speed, and cost.
+
+---
+
+## Table of Contents
+
+1. [Understanding Model Providers](#understanding-model-providers)
+2. [Adding a Model Provider](#adding-a-model-provider)
+3. [Model Types Explained](#model-types-explained)
+4. [Choosing the Right Model](#choosing-the-right-model)
+5. [Load Balancing](#load-balancing)
+6. [Cost Management](#cost-management)
+
+---
+
+## Understanding Model Providers
+
+A **model provider** is a company or service that runs AI models and lets
+you use them. Think of it like choosing a phone carrier -- different
+providers offer different plans, coverage, and features.
+
+### Common Providers
+
+| Provider | Popular Models | Strengths |
+|----------|---------------|-----------|
+| **OpenAI** | GPT-4o, GPT-4o-mini, o1 | Most widely used, strong general ability |
+| **Anthropic** | Claude Opus, Claude Sonnet, Claude Haiku | Long documents, careful reasoning, safety |
+| **Google** | Gemini Pro, Gemini Flash | Multimodal (text + images), large context |
+| **Mistral** | Mistral Large, Mixtral | Fast, open-source options |
+| **Meta** | Llama 3 | Open-source, can be self-hosted |
+| **Cohere** | Command R+, Embed | Strong at search and retrieval |
+| **Local models** | Via Ollama, vLLM | Runs on your own hardware, no data leaves your network |
+
+You can set up multiple providers at the same time. This lets you use
+different models for different purposes.
+
+---
+
+## Adding a Model Provider
+
+### Step-by-Step
+
+1. Go to **"Settings"** in the sidebar.
+2. Click **"Model Providers."**
+3. Find the provider you want in the list.
+4. Click **"Set Up"** or **"Configure."**
+5. Enter your API key (obtained from the provider's website).
+6. Click **"Save."**
+7. Pulse will verify the connection and show available models.
+
+### Getting an API Key
+
+Each provider has its own process, but the general steps are:
+
+1. Go to the provider's website.
+2. Create an account or sign in.
+3. Navigate to "API Keys" or "Settings" > "Credentials."
+4. Generate a new key.
+5. Copy it and paste it into Pulse.
+
+> **Security note**: Pulse encrypts your API key before storing it.
+> Your key is never exposed in the user interface after you save it.
+
+---
+
+## Model Types Explained
+
+Not all models do the same thing. Pulse uses different types of models
+for different purposes.
+
+### Text Generation Models (LLMs)
+
+These are the main AI models that generate text. They power LLM nodes,
+chatbots, and agents.
+
+**Examples**: GPT-4o, Claude Sonnet, Gemini Pro, Llama 3
+
+**Used for**: Answering questions, writing content, classification,
+summarization, translation, and most AI tasks in your workflows.
+
+### Embedding Models
+
+These models convert text into numerical representations that enable
+searching. You rarely interact with them directly -- they work behind
+the scenes when you use knowledge bases.
+
+**Examples**: text-embedding-3-large, Cohere Embed
+
+**Used for**: Making your knowledge base documents searchable. When you
+upload a document and later search for information, embedding models
+are what make the search work.
+
+### Reranking Models
+
+These models improve search result quality by re-ordering results to
+put the most relevant ones first.
+
+**Examples**: Cohere Rerank, bge-reranker
+
+**Used for**: Improving knowledge base search results. Adding a
+reranker makes your chatbot find better answers.
+
+### Speech Models
+
+These models convert speech to text (transcription) or text to speech
+(voice generation).
+
+**Examples**: Whisper, TTS models
+
+**Used for**: Voice-based applications, transcription workflows.
+
+### Image Models
+
+These models generate images from text descriptions or analyze existing
+images.
+
+**Examples**: DALL-E 3, Stable Diffusion
+
+**Used for**: Image generation, visual content creation.
+
+---
+
+## Choosing the Right Model
+
+### Decision Guide
+
+| Your Priority | Recommended Model Tier | Examples |
+|--------------|----------------------|----------|
+| **Best quality** | Flagship models | GPT-4o, Claude Opus, Gemini Ultra |
+| **Good quality, lower cost** | Mid-tier models | GPT-4o-mini, Claude Sonnet, Gemini Flash |
+| **Lowest cost** | Small models | Claude Haiku, Gemini Flash (shorter context) |
+| **Data privacy** | Self-hosted models | Llama 3 via Ollama or vLLM |
+| **Speed** | Small or mid-tier | GPT-4o-mini, Claude Haiku, Gemini Flash |
+
+### Match the Model to the Task
+
+Different tasks need different levels of model capability:
+
+| Task | Model Recommendation |
+|------|---------------------|
+| Simple classification ("Is this a billing question?") | Small model (cheapest) |
+| Customer support answers | Mid-tier model (good balance) |
+| Complex analysis or reasoning | Flagship model (best quality) |
+| Content generation (blog posts, marketing) | Mid-tier or flagship |
+| Data extraction (names, dates from text) | Small or mid-tier |
+
+> **Tip**: In a workflow, you can use different models for different
+> nodes. Use a cheap model for classification and a powerful model for
+> the final answer. This optimizes both cost and quality.
+
+---
+
+## Load Balancing
+
+If you have multiple API keys for the same provider (or multiple
+providers offering compatible models), you can set up load balancing
+to distribute requests across them.
+
+### Why Use Load Balancing
+
+- **Rate limit avoidance**: Most providers limit how many requests you
+  can send per minute. Spreading requests across multiple keys avoids
+  hitting limits.
+- **Reliability**: If one provider is down, requests automatically go
+  to another.
+- **Cost optimization**: Distribute load across accounts with different
+  pricing tiers.
+
+### Setting Up Load Balancing
+
+1. Go to **"Settings"** > **"Model Providers."**
+2. Select the model you want to load balance.
+3. Look for a **"Load Balancing"** or **"Add Configuration"** option.
+4. Add additional API keys or endpoints.
+5. Configure the distribution strategy (round-robin is most common).
+
+---
+
+## Cost Management
+
+AI model usage has costs. Here are tips to manage them:
+
+### Monitor Usage
+
+- Check your provider's dashboard regularly for spending summaries.
+- Most providers show per-API-key usage, so you can track costs by app.
+
+### Reduce Costs
+
+| Strategy | How | Impact |
+|----------|-----|--------|
+| Use smaller models for simple tasks | Classification, routing, formatting | High savings |
+| Set max token limits | Cap response length | Medium savings |
+| Cache responses | Avoid reprocessing identical questions | Medium savings |
+| Optimize prompts | Shorter prompts = fewer tokens = lower cost | Low-medium savings |
+| Use knowledge base wisely | Only retrieve necessary chunks | Low savings |
+
+### Estimate Costs Before Building
+
+A rough guide to model pricing (costs vary, check current provider
+pricing):
+
+| Model Tier | Approximate Cost per 1,000 requests | Notes |
+|-----------|-------------------------------------|-------|
+| Small (Haiku, Flash) | $0.10 - $0.50 | Good for high-volume, simple tasks |
+| Mid-tier (Sonnet, GPT-4o-mini) | $0.50 - $5.00 | Best balance for most uses |
+| Flagship (Opus, GPT-4o, o1) | $5.00 - $50.00 | Use only when quality matters most |
+
+> **Note**: Costs depend on the length of your prompts and responses,
+> not just the number of requests. Longer conversations cost more.
+
+---
+
+## Next Steps
+
+- **Build with your models**: See [Recipes](/docs/user-guide/recipes) for
+  step-by-step guides
+- **Set up knowledge bases**: See [Knowledge Bases](/docs/user-guide/knowledge-bases)
+- **Understand app modes**: See [App Modes](/docs/user-guide/app-modes)

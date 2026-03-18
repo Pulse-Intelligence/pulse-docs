@@ -1,0 +1,157 @@
+---
+title: "Code Review Checklist"
+description: "All engineers"
+---
+
+This is the checklist that reviewers use when evaluating pull requests. Use it
+as a self-review before submitting your PR.
+
+## Before You Review
+
+- [ ] Read the PR description to understand the intent
+- [ ] Check the linked issue (if any) for context
+- [ ] Look at the full diff, not just individual files
+
+## Readability
+
+- [ ] Code is self-explanatory without excessive comments
+- [ ] Variable and function names clearly express their purpose
+- [ ] Comments explain "why", not "what"
+- [ ] No dead code or commented-out blocks
+- [ ] Functions are under 50 lines
+- [ ] Files are under 800 lines
+- [ ] No deep nesting (4+ levels)
+
+## Tenant Isolation
+
+This is the most critical check for the Pulse backend. Every data access
+must be scoped by tenant.
+
+- [ ] All database queries filter by `tenant_id`
+- [ ] Service methods accept `tenant_id` as a parameter
+- [ ] No cross-tenant data leakage is possible
+- [ ] Write operations use row-level safeguards (`FOR UPDATE`, row counts)
+- [ ] Background tasks receive and use `tenant_id`
+
+```python
+# GOOD: Always filtered
+stmt = select(Workflow).where(
+    Workflow.id == workflow_id,
+    Workflow.tenant_id == tenant_id,
+)
+
+# BAD: Missing tenant filter
+stmt = select(Workflow).where(Workflow.id == workflow_id)
+```
+
+## Error Handling
+
+- [ ] Domain-specific exceptions are used (not generic `Exception`)
+- [ ] Errors are logged with context (tenant_id, resource_id)
+- [ ] Error messages do not leak sensitive data
+- [ ] Controllers translate exceptions to HTTP status codes
+- [ ] No silently swallowed exceptions (bare `except: pass`)
+- [ ] Retryable errors logged at `warning`, terminal at `error`
+
+## Type Safety
+
+### Backend (Python)
+
+- [ ] All function signatures have type annotations
+- [ ] No use of `Any` without strong justification
+- [ ] Modern type forms used (`list[str]` not `List[str]`)
+- [ ] Pydantic models use `ConfigDict(extra="forbid")`
+- [ ] `basedpyright` passes without errors
+
+### Frontend (TypeScript)
+
+- [ ] No `any` types
+- [ ] Props types defined (using `type`, not `interface`)
+- [ ] Return types explicit for exported functions
+- [ ] `pnpm type-check:tsgo` passes without errors
+
+## Immutability
+
+- [ ] Functions return new objects instead of mutating inputs
+- [ ] No in-place modification of shared state
+- [ ] Array/object spread used for updates, not mutation
+
+```python
+# GOOD: Return new dict
+def with_updated_name(config: dict, name: str) -> dict:
+    return {**config, "name": name}
+
+# BAD: Mutate in place
+def update_name(config: dict, name: str) -> None:
+    config["name"] = name
+```
+
+## Security
+
+- [ ] No hardcoded secrets (API keys, passwords, tokens)
+- [ ] All user input is validated before processing
+- [ ] SQL injection prevention (parameterized queries via SQLAlchemy)
+- [ ] XSS prevention (no raw HTML insertion)
+- [ ] Outbound HTTP uses SSRF proxy (`core.helper.ssrf_proxy`)
+- [ ] Error messages do not expose stack traces to users
+- [ ] Authentication/authorization checked on all endpoints
+
+## Configuration
+
+- [ ] Settings accessed via `configs.dify_config` (not `os.environ`)
+- [ ] New settings added to appropriate config mixin
+- [ ] No hardcoded values that should be configurable
+- [ ] Default values are sensible for development
+
+## Database
+
+- [ ] Models inherit from `TypeBase` (not creating ad-hoc metadata)
+- [ ] Sessions use context managers
+- [ ] Queries use SQLAlchemy expressions (not raw SQL)
+- [ ] Migrations are clean and reversible
+- [ ] Indexes added for frequently queried columns
+- [ ] No N+1 query patterns
+
+## Testing
+
+- [ ] New code has tests (80%+ coverage minimum)
+- [ ] Tests follow Arrange-Act-Assert structure
+- [ ] Test names describe the behavior being verified
+- [ ] Edge cases covered (null, empty, boundary values)
+- [ ] Mocks are minimal (mock boundaries, not internals)
+- [ ] No flaky tests (no timing dependencies, no random data)
+
+## Frontend Specific
+
+- [ ] All display strings use i18n (`t('key')`) -- no hardcoded text
+- [ ] Loading and error states handled
+- [ ] Components use base components from `web/app/components/base/`
+- [ ] No direct `fetch()` calls -- use ORPC client
+- [ ] `useCallback`/`useMemo` used appropriately
+- [ ] Accessibility basics (semantic HTML, ARIA labels)
+
+## Performance
+
+- [ ] No unnecessary re-renders in React components
+- [ ] Database queries are not doing full table scans
+- [ ] Large datasets are paginated
+- [ ] Background tasks are used for long-running operations
+- [ ] No blocking I/O in request handlers
+
+## Quick Self-Review
+
+Before submitting your PR, verify:
+
+1. `make lint` passes (backend)
+2. `make type-check` passes (backend)
+3. `make test` passes (backend)
+4. `pnpm lint:fix` passes (frontend)
+5. `pnpm type-check:tsgo` passes (frontend)
+6. `pnpm test` passes (frontend)
+7. PR description explains what and why
+8. All new code has tests
+
+## Next Steps
+
+- [Database & Migrations](/docs/contributing/database-and-migrations) -- for schema change reviews
+- [Common Mistakes](/docs/contributing/common-mistakes) -- frequent issues found in reviews

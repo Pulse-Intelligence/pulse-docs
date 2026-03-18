@@ -1,0 +1,485 @@
+---
+title: "Common Mistakes"
+description: "All engineers"
+---
+
+This document lists the most frequent mistakes found in code reviews, with
+explanations and fixes for each.
+
+---
+
+## 1. Forgetting `tenant_id` in Queries
+
+The single most common and most dangerous mistake. Missing `tenant_id`
+filters cause cross-tenant data leakage.
+
+### Wrong
+
+```python
+def get_workflows(status: str) -> list[Workflow]:
+    with Session(db.engine) as session:
+        stmt = select(Workflow).where(Workflow.status == status)
+        return session.execute(stmt).scalars().all()
+```
+
+### Right
+
+```python
+def get_workflows(tenant_id: str, status: str) -> list[Workflow]:
+    with Session(db.engine) as session:
+        stmt = select(Workflow).where(
+            Workflow.tenant_id == tenant_id,
+            Workflow.status == status,
+        )
+        return session.execute(stmt).scalars().all()
+```
+
+### Why It Matters
+
+Pulse is multi-tenant. Without `tenant_id` filtering, one workspace can
+see or modify another workspace's data. This is a security vulnerability.
+
+**Rule:** Every function that touches the database must accept `tenant_id`
+and include it in every query's `WHERE` clause.
+
+---
+
+## 2. Using `print()` Instead of `logger`
+
+### Wrong
+
+```python
+def process_document(doc_id: str):
+    print(f"Processing document {doc_id}")
+    # ...
+    print("Done!")
+```
+
+### Right
+
+```python
+import logging
+
+logger = logging.getLogger(__name__)
+
+def process_document(tenant_id: str, doc_id: str):
+    logger.info("Processing document %s for tenant %s", doc_id, tenant_id)
+    # ...
+    logger.info("Completed document %s", doc_id)
+```
+
+### Why It Matters
+
+- `print()` goes to stdout with no timestamp, level, or context
+- `logger` integrates with structured logging, OTEL, and log aggregation
+- Production logs need severity levels (info, warning, error)
+- Context (tenant_id, workflow_id) is essential for debugging
+
+**Rule:** Never use `print()` in production code. Always use
+`logging.getLogger(__name__)`.
+
+---
+
+## 3. Reading Environment Variables Directly
+
+### Wrong
+
+```python
+import os
+
+max_upload = int(os.environ.get("MAX_UPLOAD_SIZE", "10485760"))
+debug = os.getenv("DEBUG", "false").lower() == "true"
+```
+
+### Right
+
+```python
+from configs import dify_config
+
+max_upload = dify_config.UPLOAD_FILE_SIZE_LIMIT
+debug = dify_config.DEBUG
+```
+
+### Why It Matters
+
+- `dify_config` provides type safety (Pydantic validates and casts)
+- Centralized configuration is auditable and documentable
+- Environment variable names are scattered and easy to misspell
+- `dify_config` supports remote settings sources (Apollo, Nacos)
+
+**Rule:** Always use `configs.dify_config` for all runtime settings.
+
+---
+
+## 4. Hardcoding Display Strings in the Frontend
+
+### Wrong
+
+```tsx
+function EmptyState() {
+  return (
+    <div>
+      <h2>No workflows found</h2>
+      <p>Create your first workflow to get started.</p>
+    </div>
+  )
+}
+```
+
+### Right
+
+```tsx
+import { useTranslation } from 'react-i18next'
+
+function EmptyState() {
+  const { t } = useTranslation()
+  return (
+    <div>
+      <h2>{t('workflow.emptyState.title')}</h2>
+      <p>{t('workflow.emptyState.description')}</p>
+    </div>
+  )
+}
+```
+
+### Why It Matters
+
+Pulse supports 23+ languages. Hardcoded strings cannot be translated and
+create an inconsistent user experience for non-English users.
+
+**Rule:** All user-facing strings must be in `web/i18n/en-US/` and
+referenced via `t('key')`.
+
+---
+
+## 5. Not Running Lint Before Committing
+
+### Wrong
+
+```bash
+git add .
+git commit -m "feat: add new feature"
+# CI fails with lint errors
+```
+
+### Right
+
+```bash
+# Backend
+uv run --project api ruff check --fix --unsafe-fixes
+uv run --project api ruff format
+uv run --project api basedpyright .
+
+# Frontend
+cd web && pnpm lint:fix
+cd web && pnpm type-check:tsgo
+
+# Then commit
+git add .
+git commit -m "feat: add new feature"
+```
+
+### Why It Matters
+
+Lint errors caught in CI waste time for everyone -- the author has to fix
+and re-push, and reviewers have to re-check. Run all checks locally first.
+
+**Rule:** Run lint, format, and type-check before every commit.
+
+---
+
+## 6. Mutating Objects
+
+### Wrong
+
+```python
+def add_metadata(config: dict, key: str, value: str) -> dict:
+    config["metadata"][key] = value  # Mutates the original!
+    return config
+```
+
+### Right
+
+```python
+def add_metadata(config: dict, key: str, value: str) -> dict:
+    new_metadata = {**config.get("metadata", {}), key: value}
+    return {**config, "metadata": new_metadata}
+```
+
+### Wrong (Frontend)
+
+```tsx
+function updateItem(items: Item[], id: string, name: string): Item[] {
+  const item = items.find(i => i.id === id)
+  if (item) item.name = name  // Mutates!
+  return items
+}
+```
+
+### Right (Frontend)
+
+```tsx
+function updateItem(items: Item[], id: string, name: string): Item[] {
+  return items.map(item =>
+    item.id === id ? { ...item, name } : item,
+  )
+}
+```
+
+### Why It Matters
+
+Mutation creates hidden side effects. The caller does not expect their data
+to change. Immutable patterns are safer, more predictable, and easier to
+debug.
+
+**Rule:** Always return new objects. Never mutate inputs.
+
+---
+
+## 7. Business Logic in Controllers
+
+### Wrong
+
+```python
+class WorkflowController:
+    def create(self, tenant_id: str):
+        data = request.get_json()
+
+        # BAD: Business logic in controller
+        with Session(db.engine) as session:
+            count = session.execute(
+                select(func.count()).where(
+                    Workflow.tenant_id == tenant_id
+                )
+            ).scalar()
+            if count >= 50:
+                return {"error": "Quota exceeded"}, 429
+
+            workflow = Workflow(
+                tenant_id=tenant_id,
+                name=data["name"],
+            )
+            session.add(workflow)
+            session.commit()
+
+        return {"id": workflow.id}, 201
+```
+
+### Right
+
+```python
+class WorkflowController:
+    def create(self, tenant_id: str):
+        data = CreateWorkflowRequest.model_validate(request.get_json())
+        workflow = WorkflowService.create_workflow(
+            tenant_id=tenant_id,
+            name=data.name,
+        )
+        return {"id": workflow.id}, 201
+
+
+class WorkflowService:
+    @staticmethod
+    def create_workflow(tenant_id: str, name: str) -> Workflow:
+        # Quota check, validation, persistence -- all in the service
+        ...
+```
+
+### Why It Matters
+
+Controllers should only translate HTTP to service calls. Business logic
+in controllers cannot be reused, tested independently, or composed with
+other services.
+
+**Rule:** Controllers parse input, call services, return output. Nothing else.
+
+---
+
+## 8. Missing Error Handling
+
+### Wrong
+
+```python
+def fetch_remote_data(url: str) -> dict:
+    response = ssrf_proxy.get(url)
+    return response.json()  # What if it fails?
+```
+
+### Right
+
+```python
+import logging
+
+from core.helper import ssrf_proxy
+from services.errors.base import ExternalServiceError
+
+logger = logging.getLogger(__name__)
+
+def fetch_remote_data(url: str) -> dict:
+    try:
+        response = ssrf_proxy.get(url, timeout=30)
+        response.raise_for_status()
+        return response.json()
+    except requests.Timeout:
+        logger.warning("Timeout fetching %s", url)
+        raise ExternalServiceError(f"Request to {url} timed out")
+    except requests.RequestException as e:
+        logger.error("Failed to fetch %s: %s", url, str(e))
+        raise ExternalServiceError(f"Failed to fetch data from {url}")
+```
+
+### Why It Matters
+
+Unhandled errors crash the request and show raw stack traces to users.
+Proper error handling provides useful feedback and logs debugging context.
+
+**Rule:** Handle errors at every boundary. Log context. Raise domain
+exceptions.
+
+---
+
+## 9. Using `Any` Type
+
+### Wrong (Python)
+
+```python
+def process(data: Any) -> Any:
+    return data["result"]
+```
+
+### Right (Python)
+
+```python
+from typing import TypedDict
+
+class ProcessInput(TypedDict):
+    result: str
+    metadata: dict[str, str]
+
+def process(data: ProcessInput) -> str:
+    return data["result"]
+```
+
+### Wrong (TypeScript)
+
+```tsx
+function renderNode(node: any) {
+  return <div>{node.name}</div>
+}
+```
+
+### Right (TypeScript)
+
+```tsx
+type WorkflowNode = {
+  id: string
+  name: string
+  type: NodeType
+}
+
+function renderNode(node: WorkflowNode) {
+  return <div>{node.name}</div>
+}
+```
+
+### Why It Matters
+
+`Any` defeats the type system. It hides bugs that the type checker would
+otherwise catch at development time instead of runtime.
+
+**Rule:** Never use `Any` / `any`. Use `unknown` if the type is genuinely
+unknown, then narrow it with type guards.
+
+---
+
+## 10. Forgetting to Scope Celery Tasks by Tenant
+
+### Wrong
+
+```python
+@shared_task(queue="dataset")
+def reindex_all_documents():
+    # BAD: Processes ALL tenants in one task
+    with Session(db.engine) as session:
+        docs = session.execute(select(Document)).scalars().all()
+        for doc in docs:
+            index_document(doc)
+```
+
+### Right
+
+```python
+@shared_task(queue="dataset")
+def reindex_tenant_documents(tenant_id: str):
+    # GOOD: Scoped to a single tenant
+    with Session(db.engine) as session:
+        docs = session.execute(
+            select(Document).where(Document.tenant_id == tenant_id)
+        ).scalars().all()
+        for doc in docs:
+            index_document(doc)
+```
+
+### Why It Matters
+
+Tenant scoping in background tasks is just as critical as in HTTP handlers.
+A task that processes all tenants creates data leakage risk, makes it
+impossible to attribute resource usage, and cannot be retried safely.
+
+**Rule:** Every Celery task must accept `tenant_id` and scope all operations
+to that tenant.
+
+---
+
+## 11. Passing ORM Objects to Celery Tasks
+
+### Wrong
+
+```python
+# This will fail -- ORM objects are not JSON-serializable
+reindex_document.delay(document=document_orm_object)
+```
+
+### Right
+
+```python
+# Pass IDs and simple types
+reindex_document.delay(
+    tenant_id=document.tenant_id,
+    document_id=document.id,
+)
+```
+
+### Why It Matters
+
+Celery serializes task arguments to JSON for transport via Redis. ORM
+objects contain SQLAlchemy internal state that cannot be serialized.
+Additionally, the object state may change between when the task is
+enqueued and when it runs.
+
+**Rule:** Only pass JSON-serializable values (strings, numbers, dicts,
+lists) to Celery tasks. Re-fetch data inside the task.
+
+---
+
+## Quick Reference
+
+| Mistake | Fix |
+|---------|-----|
+| Missing `tenant_id` | Add to every query WHERE clause |
+| `print()` | Use `logging.getLogger(__name__)` |
+| `os.environ` | Use `configs.dify_config` |
+| Hardcoded strings | Use `t('key')` from i18n |
+| Skip lint | Run lint/format/typecheck before commit |
+| Mutation | Return new objects with spread/copy |
+| Logic in controller | Move to service layer |
+| Missing error handling | Try/except with domain errors |
+| `Any` type | Use specific types or `unknown` |
+| Tenant-less tasks | Pass and filter by `tenant_id` |
+| ORM objects in tasks | Pass IDs, re-fetch in task |
+
+## Next Steps
+
+- [Code Review Checklist](/docs/contributing/code-review-checklist) -- full review criteria
+- [Backend Patterns](/docs/contributing/backend-patterns) -- correct patterns to follow
+- [Frontend Patterns](/docs/contributing/frontend-patterns) -- correct patterns to follow

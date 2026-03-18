@@ -1,0 +1,20 @@
+{
+  "title": "Architecture",
+  "pages": [
+    "system-overview",
+    "workflow-engine",
+    "rag-pipeline",
+    "model-runtime",
+    "plugin-system",
+    "trigger-system",
+    "multi-tenancy",
+    "app-modes-and-runners",
+    "async-and-celery",
+    "storage-and-data-flow",
+    "performance-and-scaling",
+    "observability",
+    "security-model",
+    "---Design Decisions---",
+    "...design-decisions"
+  ]
+}

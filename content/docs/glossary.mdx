@@ -1,0 +1,412 @@
+---
+title: "Glossary"
+description: "Everyone"
+---
+
+This glossary defines the shared vocabulary used throughout the Pulse codebase
+and documentation. Terms are listed alphabetically. Where a term maps to a
+specific code location, that path is noted in parentheses.
+
+---
+
+## A
+
+### Agent
+
+An autonomous LLM-powered entity that can use tools, make decisions, and
+execute multi-step reasoning to accomplish a goal. In Pulse, agents operate
+within the workflow engine and can call tools, query knowledge bases, and
+chain together multiple LLM calls. See also: Agent Chat.
+
+### Agent Chat
+
+An app mode (`AGENT_CHAT`) where the LLM acts as a conversational agent with
+access to tools and knowledge bases. The agent decides which tools to invoke
+based on user input.
+
+### Alembic
+
+The database migration tool used by Pulse. Migration scripts live in
+`api/migrations/versions/`. Alembic is integrated via Flask-Migrate
+(`api/extensions/ext_migrate.py`).
+
+### App
+
+The top-level container for an LLM application in Pulse. Every app has a mode
+(see App Modes), configuration, and associated resources (workflows, datasets,
+model providers). Defined in `api/models/model.py`.
+
+### App Modes
+
+The six types of application that Pulse supports:
+
+| Mode | Enum Value | Description |
+|------|-----------|-------------|
+| Completion | `COMPLETION` | Single prompt-response, no conversation history |
+| Chat | `CHAT` | Multi-turn conversational interface |
+| Advanced Chat | `ADVANCED_CHAT` | Chat with workflow-based orchestration |
+| Agent Chat | `AGENT_CHAT` | Chat with autonomous tool-using agent |
+| Workflow | `WORKFLOW` | Visual DAG-based automation pipeline |
+| RAG Pipeline | `RAG_PIPELINE` | Retrieval-augmented generation pipeline |
+
+### App Router
+
+The Next.js 15 routing system used by the Pulse frontend. Routes are organized
+into route groups: `(commonLayout)`, `(shareLayout)`, and `(marketing)`.
+
+## B
+
+### Base Components
+
+The ~107 shared React components in `web/app/components/base/` that form the
+design system (buttons, modals, inputs, tooltips, etc.).
+
+### BasedPyright
+
+The type checker used for the Python backend. Configuration lives in
+`api/pyrightconfig.json`. Run with `uv run basedpyright .`.
+
+## C
+
+### Celery
+
+The distributed task queue used for asynchronous workloads. Pulse uses
+Celery 5.5 with Redis as the message broker. Workers are started from
+`api/celery_entrypoint.py` and tasks are defined in `api/tasks/`.
+
+### Chatflow
+
+A workflow designed for multi-turn conversation, where the workflow graph
+includes memory nodes and conversation context. Chatflows power the
+Advanced Chat app mode.
+
+### Completion
+
+An app mode (`COMPLETION`) for single-turn prompt-response interactions
+without conversation history.
+
+### Controller
+
+The HTTP layer in the backend DDD architecture. Controllers parse incoming
+requests via Pydantic models, invoke services, and return serialized
+responses. They contain no business logic. Located in `api/controllers/`.
+
+### Core
+
+The domain logic layer containing engines, algorithms, and platform
+capabilities. Located in `api/core/`. Subdivided into workflow, rag, plugin,
+model_runtime, tools, trigger, and more.
+
+## D
+
+### DAG (Directed Acyclic Graph)
+
+The execution model for workflows. Each workflow is a graph of nodes
+connected by edges, where execution flows forward without cycles. The
+graph engine traverses the DAG, executing nodes in topological order
+with support for parallel branches.
+
+### Dataset
+
+A collection of documents that have been processed for retrieval. Also
+called a Knowledge Base in the UI. Datasets go through the RAG pipeline
+(extract, chunk, embed, index) to become searchable. Managed by
+`api/services/dataset_service.py`.
+
+### DDD (Domain-Driven Design)
+
+The architectural pattern used by the Pulse backend. The codebase is
+organized into layers: Controllers (HTTP) -> Services (orchestration) ->
+Core (domain logic) -> Models/Repositories (persistence).
+
+### Dify
+
+The upstream open-source project that Pulse is forked from. Dify is
+maintained by LangGenius. The Pulse fork diverges with custom features,
+branding, and deployment configurations.
+
+### dify_config
+
+The central configuration object (`configs.dify_config`). It is a Pydantic v2
+BaseSettings instance that loads values from environment variables, `.env`
+files, and optional remote sources (Apollo, Nacos). All runtime settings
+must be accessed through this object, never by reading `os.environ` directly.
+
+## E
+
+### Embedding
+
+The process of converting text into dense vector representations for
+semantic search. Pulse supports multiple embedding providers through the
+model runtime plugin system.
+
+### Extension
+
+A Flask extension that initializes a specific capability (database, Redis,
+storage, Celery, OTEL, etc.). Located in `api/extensions/`. There are 23+
+extensions, initialized in order by `api/app_factory.py`.
+
+## G
+
+### Graph Engine
+
+The execution engine that runs workflow DAGs. It processes nodes in
+topological order, manages the variable pool, handles parallel branches,
+and emits streaming events. Located in `api/core/workflow/`.
+
+## I
+
+### i18n (Internationalization)
+
+The translation system for the frontend. Pulse supports 23+ languages.
+All user-facing strings must be defined in `web/i18n/en-US/` and
+referenced via translation keys. Never hardcode display strings in
+component code.
+
+## J
+
+### Jotai
+
+An atomic state management library used in the frontend for fine-grained
+reactive state that does not need to be shared globally. Used alongside
+Zustand for different state management needs.
+
+## K
+
+### Knowledge Base
+
+The user-facing name for a Dataset. A searchable collection of documents
+that have been processed through the RAG pipeline. Users create knowledge
+bases in the UI, upload documents, and attach them to apps for retrieval.
+
+## M
+
+### Migration
+
+A database schema change managed by Alembic. Migrations are generated
+with `uv run flask db revision --autogenerate -m "description"` and applied
+with `uv run flask db upgrade`. Files live in `api/migrations/versions/`.
+
+### Model Provider
+
+An abstraction for LLM services (OpenAI, Anthropic, local models, etc.).
+Providers are implemented as plugins and expose capabilities for LLM,
+embedding, rerank, TTS, STT, and moderation. Managed through
+`api/core/model_runtime/` and the plugin system.
+
+### Model Runtime
+
+The plugin-based abstraction layer that normalizes access to different
+LLM providers. It provides a unified interface for invoking models
+regardless of the underlying provider. Located in `api/core/model_runtime/`.
+
+## N
+
+### Node
+
+A single processing step in a workflow DAG. Pulse has 29 node types
+including LLM, HTTP Request, Code, Knowledge Retrieval, If/Else,
+Iteration, Loop, Tool, Answer, and various trigger types. Node
+implementations live in `api/core/workflow/nodes/`.
+
+### Node Types
+
+The complete set of workflow node types:
+
+| Category | Types |
+|----------|-------|
+| Triggers | Start, Webhook Trigger, Schedule Trigger, Plugin Trigger |
+| LLM | LLM, Question Classifier, Parameter Extractor |
+| Data | Knowledge Retrieval, Knowledge Index, HTTP Request, Code |
+| Logic | If/Else, Iteration, Loop, Variable Assigner, Variable Aggregator, List Operator, Template Transform |
+| Actions | Tool, Human Input, Answer, End |
+| Data Sources | Datasource, Document Extractor |
+| Agent | Agent |
+
+## O
+
+### ORPC
+
+The type-safe API client used in the frontend for communication with the
+backend. Contracts are defined with TypeScript types, providing end-to-end
+type safety between frontend and backend.
+
+### OTEL (OpenTelemetry)
+
+The observability framework used for distributed tracing and metrics.
+Configured in `api/configs/observability/` and initialized by
+`api/extensions/ext_otel.py`. Trace headers are automatically injected
+into HTTP responses.
+
+## P
+
+### Plugin
+
+A self-contained extension that adds capabilities to Pulse (model
+providers, tools, datasources, triggers, endpoints, agents). Plugins
+run in a separate daemon process, declare their capabilities via
+manifests, support hot-reload, and are multi-tenant aware.
+
+### Plugin Daemon
+
+The separate process (`dify-plugin-daemon`) that manages plugin
+lifecycle, execution, and isolation. Communicates with the main API
+via internal HTTP endpoints. Configured in
+`docker/docker-compose.middleware.yaml`.
+
+## R
+
+### RAG (Retrieval-Augmented Generation)
+
+The technique of enhancing LLM responses by retrieving relevant context
+from a knowledge base before generation. The full RAG pipeline in Pulse:
+
+```
+Extract --> Chunk --> Embed --> Index --> Retrieve --> Rerank --> Generate
+```
+
+### RAG Pipeline
+
+Both a processing pipeline and an app mode (`RAG_PIPELINE`). As a
+pipeline, it handles document ingestion and retrieval. As an app mode,
+it exposes the pipeline as a standalone application. Core logic in
+`api/core/rag/`.
+
+### Repository
+
+A data access abstraction used for complex query patterns. In Pulse,
+repositories are used sparingly -- only for very large tables or when
+alternative storage strategies are needed. Most data access happens
+directly in services via SQLAlchemy. Located in `api/repositories/`.
+
+### Rerank
+
+The process of re-scoring and re-ordering retrieved documents by
+relevance before passing them to the LLM. Reranking improves retrieval
+quality by using a cross-encoder or similar model. Implementations in
+`api/core/rag/rerank/`.
+
+### Ruff
+
+The Python linter and formatter used for the backend. Configuration in
+`api/.ruff.toml`. Line length limit is 120 characters. Run with
+`uv run ruff check --fix` and `uv run ruff format`.
+
+## S
+
+### Sandbox
+
+An isolated execution environment for running user-provided code
+(Python, JavaScript) safely within workflows. Runs as a separate
+container (`dify-sandbox`) with network restrictions via the SSRF proxy.
+
+### Service
+
+The business logic layer in the DDD architecture. Services coordinate
+repositories, providers, and background tasks. They enforce tenant
+rules, quotas, and side effects. Located in `api/services/`.
+
+### SSRF Proxy
+
+A Squid-based HTTP proxy that prevents Server-Side Request Forgery
+attacks. All outbound HTTP requests from the platform (and the sandbox)
+are routed through this proxy. Use `core.helper.ssrf_proxy` for
+outbound fetches.
+
+## T
+
+### TanStack Query
+
+The server-state management library (formerly React Query) used in the
+frontend for data fetching, caching, and synchronization with the backend.
+
+### Tenant
+
+The multi-tenancy unit in Pulse. Every workspace is a tenant, identified
+by a `tenant_id`. All data access must be scoped by tenant_id to ensure
+isolation. The tenant_id flows through every layer: controller, service,
+core, and database queries.
+
+### Tool
+
+A capability that agents and workflows can invoke -- for example, web
+search, calculator, API calls, or custom code. Tools are provided by
+plugins and managed through `api/core/tools/`.
+
+### Trigger
+
+An event source that starts a workflow execution. Trigger types include:
+
+- **Manual** -- user clicks "Run" or sends a message
+- **Webhook** -- external HTTP request to a registered endpoint
+- **Schedule** -- cron-based periodic execution
+- **Plugin** -- event from an installed plugin
+
+Trigger logic lives in `api/core/workflow/nodes/trigger_*` and
+`api/services/trigger/`.
+
+### TypeBase
+
+The SQLAlchemy declarative base class for new models. Inherits from
+`MappedAsDataclass` and provides type-safe column definitions. Defined
+in `api/models/base.py`. New models should inherit from `TypeBase`
+rather than the legacy `Base` class.
+
+## U
+
+### uv
+
+The Python package manager and virtual environment tool used for the
+Pulse backend. All backend CLI commands are run via
+`uv run --project api <command>`. Dependencies are managed in
+`api/pyproject.toml`.
+
+## V
+
+### Variable Pool
+
+The runtime data store for a workflow execution. As nodes execute, they
+write outputs to the variable pool. Downstream nodes read inputs from
+the pool using variable references (e.g., `{{#node_id.output_name#}}`).
+The pool is scoped to a single workflow run.
+
+### Vector Store
+
+A database optimized for storing and querying vector embeddings. Pulse
+supports 34+ vector stores including Weaviate, Qdrant, Pgvector,
+Milvus, Chroma, Elasticsearch, and many more. Implementations in
+`api/core/rag/datasource/vdb/`.
+
+### Vitest
+
+The test runner used for the frontend. Configuration in
+`web/vitest.config.ts`. Run with `pnpm test`. See
+[07 Testing Guide](/docs/contributing/testing-guide).
+
+## W
+
+### Weaviate
+
+The default vector store used by Pulse for development. Runs as a
+Docker container via `docker-compose.middleware.yaml` on port 8080.
+
+### Workflow
+
+Both a core concept and an app mode (`WORKFLOW`). A workflow is a
+DAG of interconnected nodes that process data through a defined pipeline.
+The workflow engine executes nodes in order, manages parallel branches,
+and collects results. See also: Graph Engine, Node, Variable Pool.
+
+### Workspace
+
+The user-facing name for a Tenant. A workspace contains apps, datasets,
+model provider configurations, and team members. Every resource belongs
+to exactly one workspace.
+
+## Z
+
+### Zustand
+
+The global state management library used in the frontend. Zustand stores
+manage application-wide state like user session, workspace context, and
+UI preferences. Used alongside Jotai for different granularity needs.

@@ -1,0 +1,16 @@
+{
+  "title": "Contributing",
+  "pages": [
+    "getting-started",
+    "project-structure",
+    "first-contribution",
+    "backend-patterns",
+    "frontend-patterns",
+    "adding-a-feature",
+    "testing-guide",
+    "code-review-checklist",
+    "database-and-migrations",
+    "celery-and-async",
+    "common-mistakes"
+  ]
+}

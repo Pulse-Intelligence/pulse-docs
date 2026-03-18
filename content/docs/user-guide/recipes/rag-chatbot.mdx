@@ -1,0 +1,188 @@
+---
+title: "Recipe: RAG Chatbot"
+description: "Build a chatbot that answers questions using your own documents. When"
+---
+
+Build a chatbot that answers questions using your own documents. When
+users ask questions, the chatbot searches through your uploaded
+documents, finds relevant information, and uses it to generate accurate
+answers.
+
+---
+
+## Goal
+
+By the end of this recipe, you will have a chatbot that:
+
+- Searches through your company's documents to find relevant information
+- Uses that information to answer questions accurately
+- Admits when it does not know the answer instead of making things up
+- Cites which document the answer came from
+
+---
+
+## Prerequisites
+
+Before starting, you need:
+
+1. A Pulse account with Editor or higher permissions
+2. A model provider configured (see
+   [Model Configuration](/docs/user-guide/model-configuration))
+3. Documents to upload (PDFs, Word files, or text files with the
+   information you want the chatbot to know)
+
+---
+
+## Steps
+
+### Step 1: Create a Knowledge Base
+
+1. Go to **"Knowledge"** in the sidebar.
+2. Click **"Create Knowledge Base."**
+3. Name it (e.g., "Product Documentation").
+4. Click **"Create."**
+
+### Step 2: Upload Your Documents
+
+1. In your new knowledge base, click **"Add Files."**
+2. Select the documents you want the chatbot to use.
+3. Configure the processing settings:
+   - **Chunk size**: Leave at the default (around 500-800 characters)
+     unless you have a specific reason to change it.
+   - **Chunk overlap**: Leave at the default (around 50 characters).
+4. Click **"Save and Process."**
+5. Wait for processing to complete. You will see a progress indicator.
+
+### Step 3: Test Your Knowledge Base
+
+Before building the chatbot, verify the knowledge base works:
+
+1. In your knowledge base, click **"Hit Testing"** or **"Search Test."**
+2. Type a question that should be answerable from your documents.
+3. Check that relevant chunks appear in the results.
+4. If results are poor, consider:
+   - Adjusting chunk size
+   - Adding more relevant documents
+   - Rephrasing your test question
+
+### Step 4: Create the Chatbot App
+
+1. Go to **"Apps"** in the sidebar.
+2. Click **"Create App."**
+3. Choose **"Chatbot."**
+4. Select **"Basic"** (not workflow-based -- for a simple RAG chatbot,
+   the basic mode is sufficient).
+5. Name it (e.g., "Documentation Assistant").
+6. Click **"Create."**
+
+### Step 5: Configure the Model
+
+1. In the app editor, find the **"Model"** section.
+2. Choose a model:
+   - For best quality: GPT-4o or Claude Sonnet
+   - For lower cost: GPT-4o-mini or Claude Haiku
+3. Set temperature to **0.3** (lower temperature produces more factual,
+   consistent answers -- good for documentation Q&A).
+
+### Step 6: Write the System Prompt
+
+In the system prompt section, enter instructions like:
+
+```
+You are a helpful documentation assistant. Your job is to answer
+questions using the provided context from our documentation.
+
+Rules:
+1. Only answer based on the provided context
+2. If the context does not contain the answer, say: "I could not find
+   that information in our documentation. Please contact support."
+3. Be concise and specific
+4. When possible, mention which document or section the answer comes from
+5. If the question is ambiguous, ask for clarification
+```
+
+### Step 7: Connect the Knowledge Base
+
+1. Look for a **"Knowledge"** or **"Context"** section in the app
+   editor.
+2. Click **"Add Knowledge Base."**
+3. Select the knowledge base you created in Step 1.
+4. Configure retrieval settings:
+   - **Top K**: 3 (returns the 3 most relevant chunks)
+   - **Retrieval method**: Hybrid (combines keyword and meaning-based
+     search for best results)
+   - **Score threshold**: 0.5 (only include reasonably relevant results)
+
+### Step 8: Enable Conversation Features
+
+1. Find the **"Features"** or **"Settings"** section.
+2. Enable **"Conversation opener"** and write a welcome message:
+   "Hi! I am your documentation assistant. Ask me anything about our
+   products and I will find the answer in our documentation."
+3. Add **suggested questions** that users might ask (based on your
+   documents).
+
+---
+
+## Testing
+
+### Test These Scenarios
+
+| Test | What You Are Checking | Expected Behavior |
+|------|----------------------|-------------------|
+| Ask a question covered in your docs | Knowledge base retrieval works | Accurate answer citing the document |
+| Ask a follow-up question | Conversation context works | Builds on previous answer |
+| Ask something NOT in your docs | Honest "I don't know" behavior | Admits it cannot find the information |
+| Ask a vague question | Clarification behavior | Asks for more details |
+| Ask the same question twice | Consistency | Same answer both times |
+
+### Troubleshooting
+
+| Problem | Likely Cause | Solution |
+|---------|-------------|----------|
+| Chatbot makes up answers | System prompt too permissive | Strengthen the "only use provided context" instruction |
+| Chatbot says "I don't know" for questions it should answer | Knowledge base missing content, or retrieval settings too strict | Lower the score threshold, increase Top K, or add more documents |
+| Answers are too long | No length constraint | Add "keep answers under 3 sentences" to the system prompt |
+| Answers reference wrong documents | Chunk size too large or too small | Adjust chunking settings and re-process documents |
+
+---
+
+## Variations
+
+### Add Source Citations
+
+Add to your system prompt:
+```
+Always end your answer with a "Source:" line that mentions which
+document the information came from.
+```
+
+### Multi-Language Support
+
+Add to your system prompt:
+```
+Respond in the same language the user writes in. If the user writes
+in Spanish, respond in Spanish.
+```
+
+### Upgrade to a Workflow-Based Chatbot
+
+For more control, rebuild this as an Advanced Chat app with a workflow:
+
+1. Create a new app with **"Chatbot" > "Workflow-based."**
+2. Add a Knowledge Retrieval node after the Start node.
+3. Add an LLM node that uses both the user's query and the retrieved
+   context.
+4. Add an Answer node.
+
+This gives you the ability to add branching, multiple knowledge bases,
+and more complex logic.
+
+---
+
+## Next Steps
+
+- **Add more sophistication**: See [Customer Support Bot](/docs/user-guide/recipes/customer-support-bot)
+  for routing and escalation logic.
+- **Learn about knowledge bases**: See [Knowledge Bases](/docs/user-guide/knowledge-bases)
+  for advanced configuration.

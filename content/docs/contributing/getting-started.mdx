@@ -1,0 +1,347 @@
+---
+title: "Getting Started"
+description: "New engineers"
+---
+
+This guide takes you from a fresh clone to a fully running Pulse development
+environment. Budget about 30 minutes for initial setup.
+
+## Prerequisites
+
+Install these before you begin:
+
+| Tool | Version | Purpose | Install |
+|------|---------|---------|---------|
+| Python | 3.11 or 3.12 | Backend runtime | [python.org](https://www.python.org/) |
+| Node.js | 20+ (LTS) | Frontend runtime | [nodejs.org](https://nodejs.org/) |
+| pnpm | 9+ | Frontend package manager | `npm install -g pnpm` |
+| uv | latest | Python package manager | `pip install uv` |
+| Docker | latest | Middleware services | [docker.com](https://www.docker.com/) |
+| Docker Compose | v2+ | Multi-container orchestration | Included with Docker Desktop |
+| Git | latest | Version control | [git-scm.com](https://git-scm.com/) |
+
+Verify your installations:
+
+```bash
+python3 --version    # 3.11.x or 3.12.x
+node --version       # v20.x or higher
+pnpm --version       # 9.x or higher
+uv --version         # any recent version
+docker --version     # any recent version
+docker compose version  # v2.x
+```
+
+## Step 1: Clone the Repository
+
+```bash
+git clone git@github.com:your-org/pulse.git
+cd pulse
+```
+
+## Step 2: Start Middleware Services
+
+Pulse requires several infrastructure services. The `docker-compose.middleware.yaml`
+file starts them all in containers.
+
+```bash
+cd docker
+cp middleware.env.example middleware.env
+```
+
+Edit `middleware.env` if you need to customize ports or passwords. The defaults
+work for most development setups.
+
+Start the middleware:
+
+```bash
+docker compose -f docker-compose.middleware.yaml -p pulse up -d
+```
+
+This starts:
+
+```
++------------------+       +------------------+
+|    Weaviate      |       |    SSRF Proxy    |
+|    (port 8080)   |       |    (port 3128)   |
++------------------+       +------------------+
+
++------------------+       +------------------+
+|    Sandbox       |       |  Plugin Daemon   |
+|    (port 8194)   |       |  (port 5002)     |
++------------------+       +------------------+
+```
+
+Note: Redis and PostgreSQL are expected to be running on the host machine
+or configured separately (see your team setup for connection details).
+
+Verify everything is healthy:
+
+```bash
+docker compose -f docker-compose.middleware.yaml -p pulse ps
+```
+
+All containers should show status "Up" or "healthy".
+
+## Step 3: Set Up the Backend
+
+### Configure Environment
+
+```bash
+cd ../api
+cp .env.example .env
+```
+
+Generate a secret key:
+
+```bash
+# macOS
+secret_key=$(openssl rand -base64 42)
+sed -i '' "/^SECRET_KEY=/c\\
+SECRET_KEY=$secret_key" .env
+
+# Linux
+sed -i "/^SECRET_KEY=/c\SECRET_KEY=$(openssl rand -base64 42)" .env
+```
+
+Review `.env` and ensure database and Redis connection strings match your
+environment. Key variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SECRET_KEY` | (generated above) | Flask session encryption key |
+| `DB_HOST` | `localhost` | PostgreSQL host |
+| `DB_PORT` | `5432` | PostgreSQL port |
+| `DB_USERNAME` | `pulse` | Database user |
+| `DB_PASSWORD` | (set in .env) | Database password |
+| `DB_DATABASE` | `pulse` | Database name |
+| `REDIS_HOST` | `localhost` | Redis host |
+| `REDIS_PORT` | `6379` | Redis port |
+| `REDIS_PASSWORD` | (set in .env) | Redis password |
+
+### Install Dependencies
+
+```bash
+uv sync --dev
+```
+
+This creates a virtual environment and installs all Python dependencies
+including dev/test packages.
+
+### Run Database Migrations
+
+```bash
+uv run flask db upgrade
+```
+
+This applies all Alembic migrations to create the database schema.
+
+### Start the API Server
+
+```bash
+uv run flask run --host 0.0.0.0 --port=5001 --debug
+```
+
+You should see output like:
+
+```
+ * Running on http://0.0.0.0:5001
+ * Debugger is active
+```
+
+The API is now available at `http://localhost:5001`.
+
+## Step 4: Start Celery Workers
+
+Open a new terminal window. Celery handles background tasks like document
+indexing, workflow execution, and email sending.
+
+```bash
+cd /path/to/pulse/api
+
+uv run celery -A app.celery worker \
+  -P threads -c 2 \
+  --loglevel INFO \
+  -Q dataset,priority_dataset,priority_pipeline,pipeline,mail,ops_trace,\
+app_deletion,plugin,workflow_storage,conversation,workflow,\
+schedule_poller,schedule_executor,triggered_workflow_dispatcher,\
+trigger_refresh_executor
+```
+
+Optionally, start the Celery beat scheduler for periodic tasks:
+
+```bash
+uv run celery -A app.celery beat
+```
+
+## Step 5: Set Up the Frontend
+
+Open another terminal window:
+
+```bash
+cd /path/to/pulse/web
+pnpm install
+```
+
+Create the frontend environment file:
+
+```bash
+cp .env.example .env.local
+```
+
+Ensure the API URL points to your local backend:
+
+```
+NEXT_PUBLIC_API_PREFIX=http://localhost:5001/console/api
+NEXT_PUBLIC_PUBLIC_API_PREFIX=http://localhost:5001/api
+```
+
+Start the development server:
+
+```bash
+pnpm run dev
+```
+
+The frontend is now available at `http://localhost:3000`.
+
+## Step 6: Verify Everything Works
+
+### Backend Health Check
+
+```bash
+curl http://localhost:5001/health
+```
+
+### Frontend
+
+Open `http://localhost:3000` in your browser. You should see the Pulse
+login/setup page.
+
+### Celery
+
+Check the Celery worker terminal for the "ready" message:
+
+```
+[INFO] celery@hostname ready.
+```
+
+## Architecture Overview
+
+Here is how the pieces fit together in development:
+
+```
+  Browser (localhost:3000)
+      |
+      v
+  +-------------------+
+  |   Next.js 15      |    Frontend (web/)
+  |   Dev Server       |
+  +-------------------+
+      |  API calls
+      v
+  +-------------------+
+  |   Flask API       |    Backend (api/)
+  |   (port 5001)     |
+  +--------+----------+
+      |    |    |
+      v    v    v
+  +------+ +-----+ +----------+
+  |PG 16 | |Redis| | Weaviate |   Middleware (docker/)
+  +------+ +-----+ +----------+
+      |
+      v
+  +-------------------+
+  |   Celery Workers  |    Async tasks (api/tasks/)
+  +-------------------+
+      |
+      v
+  +-------------------+
+  |  Plugin Daemon    |    Plugin execution (docker/)
+  +-------------------+
+```
+
+## Common Setup Issues
+
+### "Database connection refused"
+
+Ensure PostgreSQL is running and the connection string in `.env` is correct:
+
+```bash
+psql -h localhost -U pulse -d pulse -c "SELECT 1"
+```
+
+### "Redis connection refused"
+
+Ensure Redis is running and accessible:
+
+```bash
+redis-cli -h localhost -p 6379 ping
+# Expected: PONG
+```
+
+### "Module not found" errors
+
+Re-run dependency installation:
+
+```bash
+uv sync --dev
+```
+
+### "Migration failed"
+
+Check that the database exists and is accessible, then retry:
+
+```bash
+uv run flask db upgrade
+```
+
+If migrations are corrupted, you can reset (development only):
+
+```bash
+uv run flask db downgrade base
+uv run flask db upgrade
+```
+
+### "Port already in use"
+
+Check what is using the port and stop it:
+
+```bash
+lsof -i :5001   # Backend
+lsof -i :3000   # Frontend
+```
+
+### Frontend dependency issues
+
+Clear the cache and reinstall:
+
+```bash
+rm -rf node_modules .next
+pnpm install
+```
+
+## CLI Commands Reference
+
+The backend provides many administrative commands via Flask CLI. All commands
+are run with:
+
+```bash
+uv run --project api flask <command-name> [OPTIONS]
+```
+
+See [api/commands.md](../../../api/commands.md) for the complete reference,
+including:
+
+- Account management (reset-password, reset-email)
+- Tenant/workspace management (create-tenant, add-workspace)
+- Database operations (upgrade-db, vdb-migrate)
+- Plugin management (install-plugins, extract-plugins)
+- Data cleanup (clean-workflow-runs, clean-expired-messages)
+
+## Next Steps
+
+Now that your environment is running:
+
+1. [Project Structure](/docs/contributing/project-structure) -- understand the codebase layout
+2. [First Contribution](/docs/contributing/first-contribution) -- make your first change
+3. [Backend Patterns](/docs/contributing/backend-patterns) or
+   [Frontend Patterns](/docs/contributing/frontend-patterns) -- learn the coding conventions

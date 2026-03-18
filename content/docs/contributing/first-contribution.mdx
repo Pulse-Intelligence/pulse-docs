@@ -1,0 +1,245 @@
+---
+title: "First Contribution"
+description: "New engineers"
+---
+
+This guide walks you through the process of making your first code change,
+from branch creation to a merged pull request.
+
+## Branch Naming
+
+Use the following convention:
+
+```
+<type>/<short-description>
+```
+
+| Type | When to use | Example |
+|------|-------------|---------|
+| `feat/` | New feature | `feat/webhook-retry-config` |
+| `fix/` | Bug fix | `fix/tenant-id-missing-in-query` |
+| `refactor/` | Code restructuring | `refactor/extract-embedding-service` |
+| `docs/` | Documentation only | `docs/update-api-guide` |
+| `test/` | Test additions | `test/workflow-node-coverage` |
+| `chore/` | Build, CI, deps | `chore/upgrade-sqlalchemy` |
+| `perf/` | Performance improvement | `perf/batch-vector-inserts` |
+
+Create your branch from `main`:
+
+```bash
+git checkout main
+git pull origin main
+git checkout -b feat/my-feature
+```
+
+## Making Changes
+
+### 1. Understand the Change
+
+Before writing code, understand which layer the change belongs in:
+
+```
+  Controller  -->  Does this change HTTP input/output?
+  Service     -->  Does this change business rules?
+  Core        -->  Does this change domain algorithms?
+  Model       -->  Does this change the database schema?
+  Frontend    -->  Does this change the UI?
+```
+
+### 2. Write the Code
+
+Follow the patterns for your stack:
+
+- Backend: [04 Backend Patterns](/docs/contributing/backend-patterns)
+- Frontend: [05 Frontend Patterns](/docs/contributing/frontend-patterns)
+
+### 3. Write Tests
+
+Tests are required for all changes. Follow the TDD approach when possible:
+
+1. Write the test first (it should fail)
+2. Write the minimal code to make it pass
+3. Refactor while keeping tests green
+
+See [07 Testing Guide](/docs/contributing/testing-guide) for detailed testing patterns.
+
+## Running Quality Checks
+
+Run all checks before committing. Both backend and frontend have their own
+tool chains.
+
+### Backend Checks
+
+```bash
+# Format code
+uv run --project api ruff format
+
+# Lint (with auto-fix)
+uv run --project api ruff check --fix --unsafe-fixes
+
+# Type check
+uv run --project api basedpyright .
+
+# Run unit tests
+uv run --project api pytest tests/unit_tests/
+
+# Run a specific test file
+uv run --project api pytest tests/unit_tests/path/to/test_file.py
+
+# Run tests with coverage
+uv run --project api pytest tests/unit_tests/ --cov
+```
+
+Or use the Makefile shortcuts:
+
+```bash
+make format       # Format code
+make lint         # Lint with auto-fix
+make type-check   # Type check
+make test         # Run all tests
+```
+
+### Frontend Checks
+
+```bash
+cd web
+
+# Lint and fix
+pnpm lint:fix
+
+# Type check
+pnpm type-check:tsgo
+
+# Run tests
+pnpm test
+
+# Run tests with coverage
+pnpm test:coverage
+
+# Run a specific test
+pnpm test path/to/Component.spec.tsx
+```
+
+### Checklist Before Committing
+
+- [ ] Code is formatted (`ruff format` / `pnpm lint:fix`)
+- [ ] Linter passes (`ruff check` / `pnpm lint:fix`)
+- [ ] Type checker passes (`basedpyright` / `pnpm type-check:tsgo`)
+- [ ] All tests pass
+- [ ] New code has tests
+- [ ] No hardcoded secrets or credentials
+- [ ] `tenant_id` is used in all backend queries
+- [ ] i18n strings are in `web/i18n/en-US/` (not hardcoded)
+
+## Commit Messages
+
+Use conventional commit format:
+
+```
+<type>: <description>
+
+<optional body>
+```
+
+Types match the branch naming prefixes: `feat`, `fix`, `refactor`, `docs`,
+`test`, `chore`, `perf`, `ci`.
+
+Examples:
+
+```
+feat: add webhook retry configuration to trigger settings
+
+fix: scope dataset query by tenant_id to prevent cross-tenant access
+
+refactor: extract embedding logic into dedicated service class
+
+test: add unit tests for workflow variable pool serialization
+```
+
+Rules:
+- Use lowercase for the description
+- No period at the end of the subject line
+- Use imperative mood ("add" not "added" or "adds")
+- Keep the subject line under 72 characters
+- Use the body for context and reasoning when helpful
+
+## Creating a Pull Request
+
+### 1. Push Your Branch
+
+```bash
+git push -u origin feat/my-feature
+```
+
+### 2. Open the PR
+
+Create the PR against `main` with:
+
+- A clear, concise title (under 72 characters)
+- A description that includes:
+  - What changed and why
+  - How to test it
+  - Link to the related issue (if any)
+
+### 3. PR Description Template
+
+```markdown
+## Summary
+
+Brief description of what this PR does and why.
+
+- Bullet point of key change 1
+- Bullet point of key change 2
+
+## Test Plan
+
+- [ ] Unit tests added/updated
+- [ ] Manual testing performed
+- [ ] Verified in local development environment
+
+Fixes #123
+```
+
+### 4. Respond to Review
+
+Reviewers will check against the [Code Review Checklist](/docs/contributing/code-review-checklist).
+Common review topics:
+
+- Tenant isolation (`tenant_id` in every query)
+- Error handling (domain-specific exceptions, not generic ones)
+- Type safety (no `Any` types, proper annotations)
+- Immutability (return new objects, do not mutate)
+- File size (under 800 lines)
+- Test coverage (80%+ minimum)
+
+Address all feedback, push fixes, and re-request review.
+
+## After Your PR Merges
+
+1. Delete your branch: `git branch -d feat/my-feature`
+2. Pull the latest main: `git checkout main && git pull`
+3. Celebrate -- you are a Pulse contributor!
+
+## Quick Reference
+
+```
+git checkout -b feat/my-feature    # Create branch
+# ... make changes ...
+make lint                          # Backend lint
+make type-check                    # Backend types
+make test                          # Backend tests
+cd web && pnpm lint:fix            # Frontend lint
+cd web && pnpm type-check:tsgo    # Frontend types
+cd web && pnpm test               # Frontend tests
+git add <files>                    # Stage changes
+git commit -m "feat: description"  # Commit
+git push -u origin feat/my-feature # Push
+# Open PR on GitHub
+```
+
+## Next Steps
+
+- [Backend Patterns](/docs/contributing/backend-patterns) -- if working on the API
+- [Frontend Patterns](/docs/contributing/frontend-patterns) -- if working on the UI
+- [Testing Guide](/docs/contributing/testing-guide) -- for thorough testing guidance
+- [Code Review Checklist](/docs/contributing/code-review-checklist) -- what reviewers look for

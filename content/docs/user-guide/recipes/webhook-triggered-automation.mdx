@@ -1,0 +1,232 @@
+---
+title: "Recipe: Webhook-Triggered Automation"
+description: "Build a workflow that automatically runs when an external system sends"
+---
+
+Build a workflow that automatically runs when an external system sends
+it a signal. For example, when a new form submission arrives, when a
+payment is processed, or when a ticket is created in another tool.
+
+---
+
+## Goal
+
+By the end of this recipe, you will have a workflow that:
+
+- Listens for events from an external system (via a webhook URL)
+- Processes the incoming data
+- Takes action based on the data (generates a response, sends a
+  notification, updates a record)
+
+The example we will build: a workflow that receives a customer feedback
+form submission, analyzes the sentiment, generates a response, and
+sends a summary notification.
+
+---
+
+## Prerequisites
+
+1. A Pulse account with Editor or higher permissions
+2. A model provider configured
+3. An external system that can send webhook requests (a form builder,
+   CRM, payment processor, etc.)
+
+> **What is a webhook?** A webhook is like a doorbell for your workflow.
+> When an external system has something to report (like "a new form was
+> submitted"), it rings the doorbell (sends data to a URL), and your
+> workflow wakes up and processes it.
+
+---
+
+## Steps
+
+### Step 1: Create the Workflow App
+
+1. Click **"Create App"** from the dashboard.
+2. Choose **"Workflow."**
+3. Name it "Feedback Processor."
+4. Click **"Create."**
+
+### Step 2: Replace the Start Node with a Webhook Trigger
+
+1. You will see a Start node on the canvas. Delete it (or look for an
+   option to change the trigger type).
+2. Add a **Trigger: Webhook** node.
+3. Click the node to configure it:
+   - Pulse will generate a unique **webhook URL** for this workflow.
+     Copy this URL -- you will give it to your external system later.
+   - Define the expected data format. For a feedback form, you might
+     expect:
+     - `customer_name` (text)
+     - `email` (text)
+     - `feedback_text` (text)
+     - `rating` (number, 1-5)
+
+### Step 3: Add Sentiment Analysis
+
+1. Add an **LLM** node after the webhook trigger.
+2. Name it "Analyze Sentiment."
+3. Choose a fast model (GPT-4o-mini or Claude Haiku -- sentiment
+   analysis is a simple task).
+4. Write this prompt:
+
+```
+Analyze the sentiment of this customer feedback and classify it as
+one of: POSITIVE, NEUTRAL, or NEGATIVE.
+
+Customer: {{#trigger.customer_name#}}
+Rating: {{#trigger.rating#}} out of 5
+Feedback: {{#trigger.feedback_text#}}
+
+Respond with ONLY one word: POSITIVE, NEUTRAL, or NEGATIVE.
+```
+
+### Step 4: Add Branching Based on Sentiment
+
+1. Add an **IF/ELSE** node.
+2. Configure two conditions:
+   - **IF** the sentiment contains "NEGATIVE": Route to a special
+     handling path
+   - **ELSE**: Route to a standard acknowledgment path
+
+### Step 5: Build the Negative Feedback Path
+
+For negative feedback, we want to generate a thoughtful response:
+
+1. Add an **LLM** node on the IF (negative) path.
+2. Name it "Draft Apology Response."
+3. Write a prompt:
+
+```
+A customer left negative feedback. Draft a sincere, empathetic response
+email.
+
+Customer name: {{#trigger.customer_name#}}
+Their feedback: {{#trigger.feedback_text#}}
+Their rating: {{#trigger.rating#}} out of 5
+
+The response should:
+- Acknowledge their frustration
+- Apologize sincerely
+- Offer a concrete next step (someone will reach out within 24 hours)
+- Keep it under 150 words
+```
+
+4. Optionally add an **HTTP Request** node to send a notification to
+   your team (via Slack webhook, email API, etc.):
+   - URL: Your Slack webhook URL or email API endpoint
+   - Method: POST
+   - Body: A message summarizing the negative feedback and the drafted
+     response
+
+5. Add an **End** node with the drafted response as output.
+
+### Step 6: Build the Positive/Neutral Path
+
+1. Add an **LLM** node on the ELSE path.
+2. Name it "Draft Thank You Response."
+3. Write a simpler prompt:
+
+```
+A customer left feedback. Draft a brief thank you email.
+
+Customer name: {{#trigger.customer_name#}}
+Their feedback: {{#trigger.feedback_text#}}
+Their rating: {{#trigger.rating#}} out of 5
+
+Keep it warm, brief (under 100 words), and genuine.
+```
+
+4. Add an **End** node.
+
+### Step 7: Review the Complete Workflow
+
+```
+[Webhook Trigger] --> [Analyze Sentiment] --> [IF/ELSE]
+                                                |
+                                 +-- NEGATIVE --+-- ELSE --------+
+                                 |                               |
+                         [Draft Apology] --> [Notify Team]   [Draft Thank You]
+                                 |                               |
+                              [End]                           [End]
+```
+
+### Step 8: Connect Your External System
+
+1. Copy the webhook URL from the Trigger node.
+2. In your external system (form builder, CRM, etc.), find the webhook
+   or integration settings.
+3. Paste the Pulse webhook URL as the destination.
+4. Configure the external system to send data in the format your
+   webhook expects.
+
+### Step 9: Test with the Debug Panel
+
+Before connecting a real system:
+
+1. Click **"Debug"** in the workflow editor.
+2. The webhook trigger will have a **"Test"** button that lets you
+   send sample data manually.
+3. Enter test data:
+   - customer_name: "Jane Smith"
+   - email: "jane@example.com"
+   - feedback_text: "The product broke after one week. Very disappointed."
+   - rating: 1
+4. Click **"Run"** and verify each step works correctly.
+5. Test again with positive feedback to verify the other branch.
+
+---
+
+## Testing
+
+### Test Scenarios
+
+| Scenario | Expected Behavior |
+|----------|-------------------|
+| Rating 1, negative text | Negative path: apology + team notification |
+| Rating 5, positive text | Positive path: thank you response |
+| Rating 3, neutral text | Positive path (ELSE branch) |
+| Missing fields | Error handling -- workflow should handle gracefully |
+
+### End-to-End Test
+
+1. Submit a real form through your external system.
+2. Check that the workflow triggered (you can see runs in the workflow
+   history).
+3. Verify the output at each step.
+
+---
+
+## Variations
+
+### Add a Database Record
+
+Insert an HTTP Request node to log each feedback entry in a spreadsheet
+(Google Sheets API) or database.
+
+### Auto-Send the Response Email
+
+Add an HTTP Request node that sends the drafted response email
+automatically through your email service (SendGrid, Mailgun, etc.).
+
+### Priority Routing
+
+Expand the IF/ELSE to route by rating:
+- Rating 1-2: Urgent (notify support manager immediately)
+- Rating 3: Standard processing
+- Rating 4-5: Thank you + request for public review
+
+### Multi-Source Webhooks
+
+Create multiple webhook-triggered workflows for different systems:
+- Customer feedback form
+- New order notifications
+- Support ticket creation
+- Payment failures
+
+---
+
+## Next Steps
+
+- **Run on a schedule instead**: See [Scheduled Workflow](/docs/user-guide/recipes/scheduled-workflow)
+- **Build a support chatbot**: See [Customer Support Bot](/docs/user-guide/recipes/customer-support-bot)

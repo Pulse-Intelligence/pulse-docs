@@ -1,0 +1,237 @@
+---
+title: "ADR-005: Command Channel Pattern"
+description: "Running workflows need to accept external commands:"
+---
+
+## Context
+
+Running workflows need to accept external commands:
+
+1. **Stop**: User clicks "Stop" in the UI while a workflow is executing.
+2. **Pause**: A Human Input node pauses execution until the user provides
+   input.
+3. **Resume**: User submits input for a paused Human Input node.
+4. **Update variables**: External system updates conversation variables
+   mid-execution.
+
+These commands must reach the graph engine regardless of where it is
+running. In a single-process deployment, the API server and the workflow
+engine share the same process. In a distributed deployment, the workflow
+runs in a Celery worker on a different machine.
+
+### Requirements
+
+1. The engine must check for commands without blocking node execution.
+2. Command delivery must work in both single-process and multi-process
+   deployments.
+3. Commands must be processed within one poll cycle (not queued
+   indefinitely).
+4. The implementation must be swappable without changing engine code.
+
+## Decision
+
+Define a **CommandChannel protocol** and provide two implementations:
+
+```python
+# api/core/workflow/graph_engine/protocols/command_channel.py
+class CommandChannel(Protocol):
+    def fetch_commands(self) -> list[GraphEngineCommand]: ...
+    def send_command(self, command: GraphEngineCommand) -> None: ...
+```
+
+### Implementation 1: InMemoryChannel
+
+For single-process deployments and testing:
+
+```python
+# api/core/workflow/graph_engine/command_channels/in_memory_channel.py
+class InMemoryChannel:
+    def __init__(self) -> None:
+        self._queue: Queue[GraphEngineCommand] = Queue()
+
+    def fetch_commands(self) -> list[GraphEngineCommand]:
+        # Drain all available commands (non-blocking)
+        commands = []
+        while not self._queue.empty():
+            commands.append(self._queue.get_nowait())
+        return commands
+
+    def send_command(self, command: GraphEngineCommand) -> None:
+        self._queue.put(command)
+```
+
+Uses Python's thread-safe `Queue`. The sender (API thread) and consumer
+(engine thread) share the same process.
+
+### Implementation 2: RedisChannel
+
+For distributed deployments:
+
+```python
+# api/core/workflow/graph_engine/command_channels/redis_channel.py
+class RedisChannel:
+    def __init__(self, redis_client, channel_key, command_ttl=3600):
+        self._redis = redis_client
+        self._key = channel_key
+        self._pending_key = f"{channel_key}:pending"
+
+    def fetch_commands(self) -> list[GraphEngineCommand]:
+        if not self._has_pending_commands():
+            return []  # Fast path: no commands pending
+        # Atomically read and clear the Redis list
+        with self._redis.pipeline() as pipe:
+            pipe.lrange(self._key, 0, -1)
+            pipe.delete(self._key)
+            results = pipe.execute()
+        return [self._deserialize(cmd) for cmd in results[0]]
+
+    def send_command(self, command: GraphEngineCommand) -> None:
+        with self._redis.pipeline() as pipe:
+            pipe.rpush(self._key, json.dumps(command.model_dump()))
+            pipe.expire(self._key, self._command_ttl)
+            pipe.set(self._pending_key, "1", ex=self._command_ttl)
+            pipe.execute()
+```
+
+**Pending marker optimization**: The `_pending_key` is a simple Redis key
+that is set when a command is sent and consumed when `fetch_commands` is
+called. This avoids an `LRANGE` call on every poll cycle when no commands
+are pending (the common case). The check-and-consume is done atomically
+with a pipeline.
+
+### Command Types
+
+```
+GraphEngineCommand (base)
+  |
+  +-- AbortCommand      (stop execution immediately)
+  +-- PauseCommand       (pause execution, remember resume point)
+  +-- UpdateVariablesCommand  (update variable pool mid-execution)
+```
+
+### Processing Loop
+
+The `CommandProcessor` polls the channel during the engine's dispatch
+loop:
+
+```
+Dispatcher main loop:
+  1. Process events from EventQueue
+  2. Poll CommandChannel for pending commands
+  3. For each command:
+     a. Look up registered handler
+     b. Execute handler (sets flags on GraphExecution)
+  4. Check if execution should stop/pause
+  5. Repeat
+```
+
+Command handlers are registered via a strategy pattern:
+
+```python
+self._command_processor.register_handler(AbortCommand, AbortCommandHandler())
+self._command_processor.register_handler(PauseCommand, PauseCommandHandler())
+self._command_processor.register_handler(
+    UpdateVariablesCommand,
+    UpdateVariablesCommandHandler(variable_pool),
+)
+```
+
+## Consequences
+
+### Positive
+
+- **Deployment flexibility**: The same engine code works in single-process
+  and distributed deployments by swapping the channel implementation.
+
+- **Non-blocking**: `fetch_commands()` never blocks. If no commands are
+  pending, it returns an empty list immediately.
+
+- **Testable**: Unit tests use `InMemoryChannel` -- no Redis dependency.
+  Tests can send commands synchronously and verify engine behavior.
+
+- **Extensible**: New command types can be added by defining a new
+  `GraphEngineCommand` subclass and registering a handler. No engine
+  changes needed.
+
+- **Efficient**: The Redis pending marker optimization means the common
+  case (no commands) costs one Redis `GET` + `DELETE` instead of an
+  `LRANGE` on a (likely empty) list.
+
+### Negative
+
+- **Polling latency**: Commands are not processed instantly. There is a
+  small delay (one poll cycle) between sending a command and the engine
+  acting on it. In practice, this is sub-second.
+
+- **At-most-once delivery**: If the engine crashes between reading commands
+  and processing them, commands are lost. The `DELETE` in the pipeline
+  removes commands before they are confirmed processed.
+
+- **Redis dependency**: Distributed deployments require Redis to be
+  available for command delivery. If Redis is down, commands cannot be
+  sent (but workflows continue running -- they just cannot be stopped).
+
+### Neutral
+
+- **TTL cleanup**: Redis commands expire after `command_ttl` seconds
+  (default 3600). This prevents stale commands from accumulating if a
+  workflow finishes without consuming them.
+
+## Alternatives Considered
+
+### Alternative 1: Redis Pub/Sub
+
+Use Redis pub/sub channels for command delivery.
+
+- **Pros**: Push-based (no polling), lower latency
+- **Cons**: Fire-and-forget (no persistence -- if the engine is not
+  subscribed at the moment the command is published, it is lost),
+  requires a dedicated subscriber thread in the engine
+- **Rejected because**: Commands must be reliably delivered. If the
+  engine is busy processing a node when a stop command is published,
+  it would miss the command entirely.
+
+### Alternative 2: Database Polling
+
+Store commands in a PostgreSQL table and poll it.
+
+- **Pros**: Durable, supports complex queries, no Redis dependency
+- **Cons**: Higher latency (database queries are slower than Redis),
+  requires cleanup of processed commands, adds load to the database
+- **Rejected because**: Command delivery is latency-sensitive (user
+  clicks "Stop" and expects near-instant response). Database polling
+  at the required frequency would add unnecessary load.
+
+### Alternative 3: WebSocket / gRPC Stream
+
+Establish a persistent connection from the engine to the API server.
+
+- **Pros**: Push-based, bidirectional, low latency
+- **Cons**: Complex connection management (reconnection, health checks),
+  tight coupling between API and engine lifecycle, does not work when
+  engine runs in Celery worker
+- **Rejected because**: Celery workers do not maintain persistent
+  connections to the API server. The loose coupling of a queue-based
+  channel is better suited to the task-based execution model.
+
+### Alternative 4: Shared Memory / Signals
+
+Use OS-level signals or shared memory for in-process communication.
+
+- **Pros**: Zero serialization, minimal latency
+- **Cons**: Only works within a single process, not portable to
+  distributed deployments, limited signal types, fragile
+- **Rejected because**: Must support distributed deployments. The
+  `InMemoryChannel` already provides efficient in-process
+  communication using Python's thread-safe Queue.
+
+---
+
+## Cross-References
+
+- [ADR-001: Queue-Based Graph Engine](/docs/architecture/design-decisions/queue-based-graph-engine) --
+  how commands integrate with the execution loop
+- [10 Storage and Data Flow](/docs/architecture/storage-and-data-flow) -- Redis
+  patterns including command channels
+- [ADR-004: Variable Pool Design](/docs/architecture/design-decisions/variable-pool-design) --
+  UpdateVariablesCommand modifies the pool

@@ -1,0 +1,189 @@
+---
+title: "ADR-003: Plugin Daemon Separation"
+description: "Pulse supports a plugin ecosystem that allows third-party extensions for:"
+---
+
+## Context
+
+Pulse supports a plugin ecosystem that allows third-party extensions for:
+
+- Model providers (new LLM backends)
+- Tools (external API integrations)
+- Custom node types
+
+These plugins execute untrusted third-party code. The question was how to
+safely execute plugin code while maintaining performance and isolation.
+
+### Requirements
+
+1. **Security isolation**: Plugin crashes or malicious behavior must not
+   affect the core Pulse API or other plugins.
+2. **Language independence**: Plugins should not be limited to Python.
+3. **Resource control**: Plugin resource usage (CPU, memory, network) must
+   be bounded.
+4. **Low latency**: Plugin calls happen in the hot path of workflow
+   execution. Round-trip overhead must be minimal.
+5. **Multi-tenant safety**: One tenant's plugin execution must not affect
+   another tenant's.
+
+## Decision
+
+Run plugins in a **separate Go service** (the Plugin Daemon) that
+communicates with the Pulse API over HTTP/gRPC:
+
+```
++-- Pulse API (Python) --------+     +-- Plugin Daemon (Go) -----------+
+|                               |     |                                 |
+|  Workflow execution           |     |  Plugin Runtime                 |
+|    |                          |     |    |                             |
+|    +-- PluginClient.invoke() -+---->|    +-- Load plugin package      |
+|    |                          |     |    +-- Verify signature          |
+|    +-- Receive result  <------+<----|    +-- Execute in sandbox       |
+|                               |     |    +-- Return result             |
++-------------------------------+     +---------------------------------+
+```
+
+### Key Design Choices
+
+1. **Go for the daemon**: Go provides native concurrency (goroutines),
+   fast startup, low memory footprint, and strong typing. It is
+   well-suited for a service that manages many concurrent plugin
+   invocations.
+
+2. **Separate process**: The daemon runs as its own container/process,
+   providing OS-level isolation from the Python API.
+
+3. **Signature verification**: Plugin packages include cryptographic
+   signatures that the daemon verifies before loading.
+
+4. **Per-tenant isolation**: Plugin state is scoped to the calling
+   tenant. Cross-tenant data leakage is prevented at the daemon level.
+
+### Communication Protocol
+
+```
+API Server                          Plugin Daemon
+    |                                     |
+    |-- POST /invoke  ------------------>|
+    |   {plugin_id, method, params}      |
+    |                                     |
+    |   Plugin executes...               |
+    |                                     |
+    |<-- 200 {result}  ------------------|
+    |                                     |
+```
+
+For streaming responses (e.g., LLM provider plugins), the daemon uses
+chunked HTTP responses or server-sent events.
+
+## Consequences
+
+### Positive
+
+- **Process isolation**: A plugin crash terminates only the plugin
+  execution, not the entire Pulse API. The daemon restarts the plugin
+  sandbox.
+
+- **Language independence**: Although current plugins are primarily
+  Python, the daemon architecture supports plugins written in any
+  language that can be invoked by the Go runtime.
+
+- **Resource control**: The daemon can enforce CPU, memory, and time
+  limits on plugin execution using OS-level mechanisms (cgroups,
+  process limits).
+
+- **Independent scaling**: The plugin daemon can be scaled independently
+  of the API. High plugin usage does not require scaling the entire API.
+
+- **Security boundary**: The Go service validates plugin signatures and
+  enforces permissions before execution. The Python API never loads
+  untrusted code directly.
+
+### Negative
+
+- **Network latency**: Every plugin call crosses a process boundary
+  with serialization overhead. For simple plugins, this adds 1-5ms
+  per call.
+
+- **Operational complexity**: Two services to deploy, monitor, and
+  upgrade instead of one. Docker Compose configuration grows more
+  complex.
+
+- **Debugging difficulty**: Tracing an issue from the API through the
+  daemon to the plugin requires correlated logs or distributed tracing
+  across two services.
+
+- **State management**: Plugins cannot directly access the Pulse
+  database or in-memory state. All data must be passed through the
+  invocation protocol.
+
+### Neutral
+
+- **Development workflow**: Plugin developers must package their code
+  for the daemon rather than dropping Python files into the API
+  directory. This is more work but produces a cleaner deployment model.
+
+## Alternatives Considered
+
+### Alternative 1: In-Process Plugin Execution
+
+Load plugin Python code directly into the Flask process using
+`importlib` or `exec()`.
+
+- **Pros**: Zero serialization overhead, direct access to all API
+  internals, simplest to implement
+- **Cons**: No isolation (crash = API crash), no resource limits,
+  security nightmare (arbitrary code in the API process), Python-only
+- **Rejected because**: Running untrusted code in the same process as
+  the API is an unacceptable security risk. A malicious plugin could
+  access any database credential, read any user's data, or crash the
+  entire service.
+
+### Alternative 2: Python Subprocess Sandboxing
+
+Spawn Python subprocesses for each plugin invocation with restricted
+permissions.
+
+- **Pros**: Process isolation, same language as the API, moderate
+  security through OS-level restrictions
+- **Cons**: High per-invocation overhead (process spawn), difficult to
+  enforce fine-grained permissions, Python startup time (~100ms),
+  Python-only
+- **Rejected because**: The per-invocation cost of spawning a Python
+  process is too high for the hot path. Pre-warming pools of processes
+  adds significant complexity.
+
+### Alternative 3: WebAssembly (Wasm) Sandbox
+
+Compile plugins to Wasm and execute them in a Wasm runtime (Wasmtime,
+Wasmer).
+
+- **Pros**: Strong sandboxing, near-native performance, language-agnostic
+  (any language that compiles to Wasm)
+- **Cons**: Limited ecosystem for Wasm plugins, complex build toolchain,
+  restricted system access (no filesystem, limited networking), early
+  maturity for Python-to-Wasm compilation
+- **Rejected because**: The Wasm ecosystem for server-side plugins was
+  not mature enough at the time of the decision. This alternative may
+  be reconsidered in the future as Wasm runtimes improve.
+
+### Alternative 4: Docker Container per Plugin
+
+Run each plugin in its own Docker container.
+
+- **Pros**: Maximum isolation, full OS-level resource control, supports
+  any language
+- **Cons**: Very high per-invocation overhead (container startup),
+  complex orchestration, resource-heavy (one container per plugin
+  instance)
+- **Rejected because**: Container startup time (seconds) is far too
+  slow for synchronous plugin calls in workflow execution. Pre-warming
+  containers adds operational complexity.
+
+---
+
+## Cross-References
+
+- [13 Security Model](/docs/architecture/security-model) -- plugin security details
+- [ADR-001: Queue-Based Graph Engine](/docs/architecture/design-decisions/queue-based-graph-engine) --
+  how plugins are invoked during workflow execution

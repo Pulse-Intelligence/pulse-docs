@@ -1,0 +1,76 @@
+---
+title: "Architecture Decision Records (ADRs)"
+description: "Senior engineers, architects"
+---
+
+This directory contains Architecture Decision Records for significant
+technical choices in Pulse. Each ADR documents the context, decision,
+consequences, and alternatives considered.
+
+---
+
+## ADR Template
+
+When adding a new ADR, use this template:
+
+```markdown
+# ADR-NNN: Title
+
+## Context
+
+What is the issue or question that motivated this decision?
+
+## Decision
+
+What is the change that we are proposing or have agreed to implement?
+
+## Consequences
+
+### Positive
+- What becomes easier or possible as a result?
+
+### Negative
+- What becomes harder or impossible as a result?
+
+### Neutral
+- What other effects does this have?
+
+## Alternatives Considered
+
+### Alternative 1: Name
+- Description
+- Why rejected
+
+### Alternative 2: Name
+- Description
+- Why rejected
+```
+
+---
+
+## Index
+
+| ADR | Title | Status | Summary |
+|-----|-------|--------|---------|
+| [001](/docs/architecture/design-decisions/queue-based-graph-engine) | Queue-Based Graph Engine | Accepted | Use a queue-based DAG executor with dynamic thread workers instead of sequential execution |
+| [002](/docs/architecture/design-decisions/ddd-layered-architecture) | DDD Layered Architecture | Accepted | Enforce Controller -> Service -> Core boundaries with strict import rules |
+| [003](/docs/architecture/design-decisions/plugin-daemon-separation) | Plugin Daemon Separation | Accepted | Run plugins in a separate Go service instead of in-process |
+| [004](/docs/architecture/design-decisions/variable-pool-design) | Variable Pool Design | Accepted | Namespace-isolated in-memory variable storage for workflow data flow |
+| [005](/docs/architecture/design-decisions/command-channel-pattern) | Command Channel Pattern | Accepted | InMemory/Redis channels for external workflow control (stop/pause/resume) |
+
+---
+
+## When to Write an ADR
+
+Write an ADR when:
+
+- Choosing between multiple viable architectural approaches
+- Making a decision that will be expensive to reverse
+- Introducing a new pattern or technology to the codebase
+- Deprecating or replacing an existing approach
+
+An ADR is not needed for:
+
+- Bug fixes or minor refactoring
+- Library version upgrades (unless they change architecture)
+- Coding style decisions (those belong in the contributing guide)

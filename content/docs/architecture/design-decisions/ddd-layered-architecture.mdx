@@ -1,0 +1,197 @@
+---
+title: "ADR-002: DDD Layered Architecture"
+description: "As the Pulse codebase grew, multiple patterns emerged for organizing code:"
+---
+
+## Context
+
+As the Pulse codebase grew, multiple patterns emerged for organizing code:
+
+- Some routes directly accessed the database with raw SQL
+- Some services imported Flask request objects
+- Some controllers contained business logic
+- Cross-layer imports created circular dependencies
+
+This lack of structure led to:
+
+1. **Tight coupling**: Changing a database schema required modifying
+   controllers, making refactoring risky.
+2. **Untestable code**: Business logic mixed with HTTP handling could not
+   be unit-tested without spinning up Flask.
+3. **Inconsistent patterns**: New contributors had no clear guidance on
+   where to put code.
+4. **Circular imports**: Services importing from controllers and vice versa
+   caused Python import errors.
+
+## Decision
+
+Adopt a **Domain-Driven Design (DDD) layered architecture** with strict
+import rules between layers:
+
+```
++-------------------+
+|   Controllers     |  (api/controllers/)
+|   - HTTP routing  |
+|   - Request/      |
+|     Response DTOs |
++--------+----------+
+         |  calls
+         v
++-------------------+
+|   Services        |  (api/services/)
+|   - Business      |
+|     logic         |
+|   - Orchestration |
++--------+----------+
+         |  calls
+         v
++-------------------+
+|   Core / Domain   |  (api/core/)
+|   - Domain models |
+|   - Domain logic  |
+|   - Repositories  |
++--------+----------+
+         |  accesses
+         v
++-------------------+
+|   Extensions      |  (api/extensions/)
+|   - Database      |
+|   - Redis         |
+|   - Storage       |
++-------------------+
+```
+
+### Import Rules
+
+These rules are enforced by convention and code review:
+
+| Layer | Can Import From | Cannot Import From |
+|-------|-----------------|--------------------|
+| Controllers | Services, Core, Extensions | Nothing imports controllers |
+| Services | Core, Extensions | Controllers |
+| Core | Extensions, other Core modules | Controllers, Services |
+| Extensions | Standard library, third-party | Controllers, Services, Core |
+
+### Key Principles
+
+1. **Controllers never access the database directly**. They call a service
+   method, which calls a core repository or domain function.
+
+2. **Services never access Flask request objects**. Controllers extract
+   request data into plain Python types (strings, dicts, Pydantic models)
+   before passing to services.
+
+3. **Core domain logic is framework-agnostic**. The `core/` directory
+   contains no Flask imports. It could theoretically run under any Python
+   framework.
+
+4. **Dependencies flow inward**. Outer layers depend on inner layers,
+   never the reverse.
+
+### Directory Structure
+
+```
+api/
+  controllers/         # HTTP routes, request parsing, response formatting
+    console/           # Web UI API endpoints
+    service_api/       # External service API endpoints
+    web/               # Public web endpoints
+  services/            # Business logic orchestration
+    workflow/          # Workflow management
+    app/               # App lifecycle
+    dataset/           # Knowledge base management
+  core/                # Domain logic
+    workflow/          # Workflow engine, nodes, graph
+    rag/               # RAG pipeline, retrieval, embedding
+    model_runtime/     # Model provider abstraction
+    tools/             # Tool execution framework
+    app/               # App runner and configuration
+  models/              # SQLAlchemy model definitions
+  extensions/          # Framework integrations (DB, Redis, storage)
+```
+
+## Consequences
+
+### Positive
+
+- **Testability**: Services and core modules can be unit-tested without
+  Flask. Mock the database session and test business logic directly.
+
+- **Clear boundaries**: New contributors can quickly determine where code
+  belongs by following the layer rules.
+
+- **Refactorability**: Changing the HTTP framework (e.g., from Flask to
+  FastAPI) would only require rewriting controllers. Services and core
+  remain unchanged.
+
+- **Reduced coupling**: Database schema changes are isolated to models
+  and repositories. Controllers and services are insulated.
+
+- **Consistent patterns**: Code review can enforce layer rules mechanically
+  -- any import that crosses boundaries is flagged.
+
+### Negative
+
+- **Boilerplate**: Simple CRUD operations require passing through three
+  layers (controller -> service -> core), even when the service method
+  is a trivial passthrough.
+
+- **Learning curve**: New contributors must understand the layer hierarchy
+  before they can place code correctly.
+
+- **Indirection**: Tracing a request through three layers requires
+  navigating more files than a flat structure.
+
+### Neutral
+
+- **Migration effort**: Existing code that violates layer rules must be
+  refactored incrementally. This is an ongoing effort rather than a
+  one-time migration.
+
+## Alternatives Considered
+
+### Alternative 1: Flat Structure
+
+Keep all Python files in a single `api/` directory with no layering.
+
+- **Pros**: Simple, no import rules to learn
+- **Cons**: Leads to spaghetti code at scale, circular imports,
+  untestable business logic
+- **Rejected because**: The codebase had already outgrown a flat structure,
+  with 500+ Python files
+
+### Alternative 2: Feature-Based Modules
+
+Organize by feature (e.g., `api/workflow/`, `api/dataset/`) with each
+module containing its own controllers, services, and models.
+
+- **Pros**: High cohesion within each module, easy to find related code
+- **Cons**: Cross-feature logic (e.g., a workflow node that queries
+  datasets) creates ambiguous ownership, risk of circular imports
+  between feature modules
+- **Rejected because**: Pulse features are deeply intertwined (workflows
+  use datasets, models, tools, and plugins). Clean module boundaries
+  would require extensive cross-module interfaces.
+
+### Alternative 3: Hexagonal Architecture (Ports and Adapters)
+
+Define explicit ports (interfaces) and adapters (implementations) for
+all external dependencies.
+
+- **Pros**: Maximum testability, framework independence, clean domain
+- **Cons**: Very high boilerplate (port + adapter + implementation for
+  every external interaction), steep learning curve
+- **Rejected because**: The added abstraction was judged excessive for
+  the current team size and codebase. DDD layers provide 80% of the
+  benefit with 50% of the ceremony.
+
+---
+
+## Cross-References
+
+- [04 Backend Patterns](/docs/contributing/backend-patterns) --
+  practical coding patterns within the DDD structure
+- [03 First Contribution](/docs/contributing/first-contribution) --
+  where to put code when making a change
+- [06 Adding a Feature](/docs/contributing/adding-a-feature) --
+  end-to-end feature walkthrough following layer rules

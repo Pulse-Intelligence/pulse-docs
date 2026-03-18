@@ -1,0 +1,17 @@
+{
+  "title": "User Guide",
+  "pages": [
+    "what-is-pulse",
+    "getting-started",
+    "building-your-first-chatbot",
+    "building-a-workflow",
+    "node-reference",
+    "knowledge-bases",
+    "model-configuration",
+    "---Recipes---",
+    "...recipes",
+    "---Reference---",
+    "troubleshooting-faq",
+    "app-modes"
+  ]
+}

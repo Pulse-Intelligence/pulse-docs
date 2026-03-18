@@ -1,0 +1,444 @@
+---
+title: "RAG Pipeline"
+description: "Senior Engineers"
+---
+
+The Retrieval-Augmented Generation (RAG) pipeline handles the complete lifecycle
+of document processing: from raw file ingestion through to semantic retrieval
+and result post-processing.
+
+## Pipeline Overview
+
+```
++-------+     +-------+     +-------+     +-------+     +----------+     +--------+
+|Extract|---->| Chunk |---->| Embed |---->| Index |---->| Retrieve |---->| Rerank |
+|       |     |       |     |       |     |       |     |          |     |        |
+| Parse |     | Split |     |Vectorize    | Store |     | Query    |     | Score  |
+| files |     | text  |     |text   |     |vectors|     | vectors  |     | & sort |
++-------+     +-------+     +-------+     +-------+     +----------+     +--------+
+    |              |              |             |              |               |
+    v              v              v             v              v               v
+ extractor/    splitter/     embedding/    datasource/   retrieval/    data_post_
+                                           vdb/                      processor/
+```
+
+## Directory Structure
+
+```
+api/core/rag/
+  cleaner/                 # Text cleaning utilities
+  data_post_processor/     # Post-retrieval processing (reranking, scoring)
+  datasource/
+    keyword/               # Keyword-based retrieval (BM25 via Jieba)
+    retrieval_service.py   # Central retrieval orchestrator
+    vdb/                   # Vector database implementations
+      vector_base.py       # BaseVector abstract class
+      vector_factory.py    # Vector factory + concrete initialization
+      vector_type.py       # VectorType enum
+      chroma/              # ChromaDB implementation
+      milvus/              # Milvus implementation
+      pgvector/            # PostgreSQL pgvector
+      qdrant/              # Qdrant implementation
+      weaviate/            # Weaviate implementation
+      ... (25+ more)
+  embedding/
+    cached_embedding.py    # CacheEmbedding with DB/Redis caching
+    embedding_base.py      # Embeddings abstract interface
+    retrieval.py           # Retrieval-specific embedding helpers
+  entities/                # RAG domain entities
+  extractor/               # Document extractors (PDF, DOCX, etc.)
+  index_processor/
+    index_processor_base.py    # BaseIndexProcessor abstract class
+    index_processor_factory.py # Factory for index processor selection
+    processor/
+      paragraph_index_processor.py    # Standard chunking
+      parent_child_index_processor.py # Hierarchical chunks
+      qa_index_processor.py           # Q&A pair extraction
+  models/                  # RAG-specific models (Document)
+  pipeline/                # Pipeline execution
+  rerank/                  # Reranking implementations
+  retrieval/               # Retrieval methods and routing
+  splitter/                # Text splitting implementations
+```
+
+## Stage 1: Extract
+
+Document extraction converts raw files into text. The extraction layer
+supports multiple file formats through specialized extractors in
+`api/core/rag/extractor/`.
+
+```
+Input File (PDF, DOCX, TXT, HTML, CSV, ...)
+    |
+    v
++----------------------------+
+| ExtractSetting             |
+|  - datasource_type         |
+|  - upload_file / notion_id |
+|  - document_model          |
++----------------------------+
+    |
+    v
+BaseIndexProcessor.extract(extract_setting)
+    |
+    v
+list[Document]
+  each with:
+    - page_content: str
+    - metadata: dict (doc_id, doc_hash, document_id, dataset_id)
+```
+
+## Stage 2: Chunk (Text Splitting)
+
+Text splitting breaks documents into chunks suitable for embedding.
+Two main splitter implementations exist in `api/core/rag/splitter/`:
+
+```python
+# api/core/rag/splitter/fixed_text_splitter.py
+class FixedRecursiveCharacterTextSplitter:
+    """User-defined chunking with configurable size, overlap, and separator."""
+
+class EnhanceRecursiveCharacterTextSplitter:
+    """Automatic chunking with optimized defaults."""
+```
+
+The `BaseIndexProcessor._get_splitter()` method selects the splitter:
+
+```python
+def _get_splitter(
+    self,
+    processing_rule_mode: str,  # "custom", "hierarchical", or "automatic"
+    max_tokens: int,
+    chunk_overlap: int,
+    separator: str,
+    embedding_model_instance: ModelInstance | None,
+) -> TextSplitter:
+```
+
+### Index Processor Types
+
+Three index processors handle different chunking strategies:
+
+```python
+# api/core/rag/index_processor/index_processor_factory.py
+class IndexProcessorFactory:
+    def init_index_processor(self) -> BaseIndexProcessor:
+        match self._index_type:
+            case IndexStructureType.PARAGRAPH_INDEX:
+                return ParagraphIndexProcessor()
+            case IndexStructureType.QA_INDEX:
+                return QAIndexProcessor()
+            case IndexStructureType.PARENT_CHILD_INDEX:
+                return ParentChildIndexProcessor()
+```
+
+| Processor                   | Strategy                         | Use Case                       |
+| --------------------------- | -------------------------------- | ------------------------------ |
+| `ParagraphIndexProcessor`   | Standard recursive splitting     | General documents              |
+| `QAIndexProcessor`          | Extract Q&A pairs via LLM        | FAQ-style content              |
+| `ParentChildIndexProcessor` | Hierarchical parent-child chunks | Long documents needing context |
+
+### BaseIndexProcessor Interface
+
+```python
+# api/core/rag/index_processor/index_processor_base.py
+class BaseIndexProcessor(ABC):
+    @abstractmethod
+    def extract(self, extract_setting, **kwargs) -> list[Document]: ...
+
+    @abstractmethod
+    def transform(self, documents, current_user=None, **kwargs) -> list[Document]: ...
+
+    @abstractmethod
+    def load(self, dataset, documents, multimodal_documents=None,
+             with_keywords=True, **kwargs): ...
+
+    @abstractmethod
+    def clean(self, dataset, node_ids=None, with_keywords=True, **kwargs): ...
+
+    @abstractmethod
+    def index(self, dataset, document, chunks): ...
+
+    @abstractmethod
+    def retrieve(self, retrieval_method, query, dataset,
+                 top_k, score_threshold, reranking_model) -> list[Document]: ...
+```
+
+## Stage 3: Embed
+
+### CacheEmbedding
+
+The `CacheEmbedding` class (`api/core/rag/embedding/cached_embedding.py`)
+wraps model embedding calls with a database-backed cache:
+
+```python
+class CacheEmbedding(Embeddings):
+    def __init__(self, model_instance: ModelInstance, user: str | None = None):
+        self._model_instance = model_instance
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        # 1. For each text, compute hash
+        # 2. Query DB for cached embedding by (model_name, hash, provider_name)
+        # 3. If cache hit, use cached vector
+        # 4. If cache miss, batch-embed via model API
+        # 5. Normalize vectors (L2 norm)
+        # 6. Store new embeddings in DB cache
+        # 7. Return all vectors
+```
+
+### Embedding Cache Flow
+
+```
+texts[] ──> hash each text
+               |
+          +----v----+
+          | DB query |  SELECT * FROM embeddings
+          | by hash  |  WHERE model_name=? AND hash=? AND provider_name=?
+          +----+----+
+               |
+         cache hit?
+        /          \
+      YES           NO
+       |             |
+  use cached    +----v---------+
+  vector        | Model API    |
+                | (batched by  |
+                | max_chunks)  |
+                +----+---------+
+                     |
+                +----v---------+
+                | Normalize    |
+                | (L2 norm)    |
+                +----+---------+
+                     |
+                +----v---------+
+                | INSERT into  |
+                | embeddings   |
+                | table        |
+                +--------------+
+                     |
+                     v
+              Return all vectors
+```
+
+## Stage 4: Index (Vector Store)
+
+### BaseVector Abstract Class
+
+All vector stores implement this interface
+(`api/core/rag/datasource/vdb/vector_base.py`):
+
+```python
+class BaseVector(ABC):
+    def __init__(self, collection_name: str):
+        self._collection_name = collection_name
+
+    @abstractmethod
+    def create(self, texts: list[Document], embeddings: list[list[float]], **kwargs): ...
+
+    @abstractmethod
+    def add_texts(self, documents: list[Document], embeddings: list[list[float]], **kwargs): ...
+
+    @abstractmethod
+    def text_exists(self, id: str) -> bool: ...
+
+    @abstractmethod
+    def delete_by_ids(self, ids: list[str]): ...
+
+    @abstractmethod
+    def delete_by_metadata_field(self, key: str, value: str): ...
+
+    @abstractmethod
+    def search_by_vector(self, query_vector: list[float], **kwargs) -> list[Document]: ...
+
+    @abstractmethod
+    def search_by_full_text(self, query: str, **kwargs) -> list[Document]: ...
+
+    @abstractmethod
+    def delete(self): ...
+```
+
+### Vector Factory
+
+The `Vector` class (`api/core/rag/datasource/vdb/vector_factory.py`) handles
+initialization:
+
+```python
+class Vector:
+    def __init__(self, dataset: Dataset, attributes: list | None = None):
+        self._embeddings = self._get_embeddings()
+        self._vector_processor = self._init_vector()
+
+    def _init_vector(self) -> BaseVector:
+        vector_type = dify_config.VECTOR_STORE  # or from dataset config
+        vector_factory_cls = self.get_vector_factory(vector_type)
+        return vector_factory_cls().init_vector(self._dataset, ...)
+```
+
+### Supported Vector Stores
+
+The factory pattern supports 25+ vector store implementations:
+
+| Category             | Implementations                                      |
+| -------------------- | ---------------------------------------------------- |
+| **Purpose-built**    | Weaviate, Milvus, Qdrant, Chroma                     |
+| **PostgreSQL-based** | pgvector, pgvecto_rs, OpenGauss                      |
+| **Cloud-managed**    | Alibaba AnalyticDB, Baidu VectorDB, Tencent VectorDB |
+| **Search engines**   | Elasticsearch, OpenSearch                            |
+| **Other**            | TiDB, Oracle, MyScale, Couchbase, Upstash, and more  |
+
+## Stage 5: Retrieve
+
+### RetrievalService
+
+The central orchestrator (`api/core/rag/datasource/retrieval_service.py`):
+
+```python
+class RetrievalService:
+    @classmethod
+    def retrieve(
+        cls,
+        retrieval_method: RetrievalMethod,
+        dataset_id: str,
+        query: str,
+        top_k: int = 4,
+        score_threshold: float | None = 0.0,
+        reranking_model: dict | None = None,
+        reranking_mode: str = "reranking_model",
+        weights: dict | None = None,
+        document_ids_filter: list[str] | None = None,
+        attachment_ids: list | None = None,
+    ):
+```
+
+### Retrieval Methods
+
+```python
+# api/core/rag/retrieval/retrieval_methods.py
+class RetrievalMethod:
+    SEMANTIC_SEARCH     # Vector similarity search
+    FULL_TEXT_SEARCH    # BM25 keyword search
+    HYBRID_SEARCH       # Combined semantic + keyword
+```
+
+### Hybrid Retrieval Architecture
+
+```
+                        query
+                          |
+              +-----------+-----------+
+              |                       |
+     +--------v--------+    +--------v--------+
+     | Semantic Search  |    | Full-Text (BM25)|
+     | (vector_store.   |    | (keyword_store. |
+     |  search_by_      |    |  search_by_     |
+     |  vector)         |    |  full_text)     |
+     +--------+---------+    +--------+--------+
+              |                       |
+              +-----------+-----------+
+                          |
+                 +--------v--------+
+                 | Merge + Dedup   |
+                 +--------+--------+
+                          |
+                 +--------v--------+
+                 | Rerank / Score  |
+                 | (DataPostProc.) |
+                 +--------+--------+
+                          |
+                 +--------v--------+
+                 | Top-K results   |
+                 +-----------------+
+```
+
+The `RetrievalService` uses `ThreadPoolExecutor` for parallel execution of
+semantic and keyword searches:
+
+```python
+with ThreadPoolExecutor(
+    max_workers=dify_config.RETRIEVAL_SERVICE_EXECUTORS
+) as executor:
+    futures = []
+    futures.append(executor.submit(retrieval_service._retrieve, ...))
+    # Wait for all to complete
+    for future in concurrent.futures.as_completed(futures, timeout=3600):
+        ...
+```
+
+## Stage 6: Rerank and Post-Processing
+
+### DataPostProcessor
+
+The `DataPostProcessor` (`api/core/rag/data_post_processor/`) handles
+post-retrieval processing:
+
+```
+Retrieved Documents
+    |
+    v
++-------------------+
+| Reranking         |
+|  - Model-based    |  Uses rerank model (Cohere, etc.)
+|  - Weighted       |  Combines semantic + keyword scores
+|  - Keyword weight |  BM25-based reweighting
++-------------------+
+    |
+    v
++-------------------+
+| Score Filtering   |
+|  - score_threshold|  Drop below threshold
+|  - top_k          |  Limit results
++-------------------+
+    |
+    v
+Final Results
+```
+
+### Reranking Modes
+
+```python
+# api/core/rag/rerank/rerank_type.py
+class RerankMode:
+    RERANKING_MODEL      # Use external rerank model
+    WEIGHTED_SCORE       # Weighted combination of scores
+    KEYWORD_WEIGHT       # Keyword-based reweighting
+```
+
+## Parent-Child Chunk Hierarchies
+
+The `ParentChildIndexProcessor` creates hierarchical chunk relationships:
+
+```
++---------------------------+
+|     Parent Chunk          |
+|  (larger context window)  |
+|                           |
+|  +--------+ +--------+   |
+|  | Child 1| | Child 2|   |
+|  | (small | | (small |   |
+|  | chunk) | | chunk) |   |
+|  +--------+ +--------+   |
++---------------------------+
+```
+
+During retrieval, child chunks are matched for precision, but parent chunks
+are returned for context. The `ChildChunk` model in `api/models/dataset.py`
+tracks these relationships.
+
+## Integration with Workflow Engine
+
+The RAG pipeline integrates with the workflow engine through two node types:
+
+- **KNOWLEDGE_RETRIEVAL**: Queries existing datasets using the retrieval
+  service at workflow runtime.
+- **KNOWLEDGE_INDEX**: Indexes new documents into datasets during workflow
+  execution.
+
+Additionally, the `DATASOURCE` node type serves as the root node for
+RAG pipeline workflows (app mode `rag-pipeline`).
+
+## Cross-References
+
+- [01-System Overview](/docs/architecture/system-overview) -- System context
+- [04-Model Runtime](/docs/architecture/model-runtime) -- Embedding and rerank model invocation
+- [09-Async and Celery](/docs/architecture/async-and-celery) -- Dataset indexing tasks

@@ -1,0 +1,346 @@
+---
+title: "Async and Celery"
+description: "Senior Engineers"
+---
+
+This document describes the queue topology, routing strategy, idempotency
+patterns, worker scaling approach, and Celery Beat scheduler configuration
+for Pulse's asynchronous task processing.
+
+## Queue Topology
+
+Pulse defines 15+ dedicated Celery queues, each serving a distinct workload:
+
+```
++================================================================+
+|                     Redis (Broker)                              |
+|                                                                |
+|  +---------------+  +------------------+  +------------------+ |
+|  | dataset       |  | priority_dataset |  | pipeline         | |
+|  | (doc indexing)|  | (priority index) |  | (RAG pipeline)   | |
+|  +---------------+  +------------------+  +------------------+ |
+|                                                                |
+|  +---------------+  +------------------+  +------------------+ |
+|  | mail          |  | ops_trace        |  | app_deletion     | |
+|  | (SMTP sends)  |  | (observability)  |  | (cleanup)        | |
+|  +---------------+  +------------------+  +------------------+ |
+|                                                                |
+|  +---------------+  +------------------+  +------------------+ |
+|  | plugin        |  | workflow_storage |  | conversation     | |
+|  | (plugin ops)  |  | (exec persist)   |  | (conv cleanup)   | |
+|  +---------------+  +------------------+  +------------------+ |
+|                                                                |
+|  +---------------+  +------------------+  +------------------+ |
+|  | workflow       |  | schedule_poller  |  | schedule_executor| |
+|  | (async exec)  |  | (cron polling)   |  | (sched runs)     | |
+|  +---------------+  +------------------+  +------------------+ |
+|                                                                |
+|  +---------------+  +------------------+  +------------------+ |
+|  | triggered_    |  | trigger_refresh_ |  | workflow_        | |
+|  | workflow_     |  | executor         |  | draft_var        | |
+|  | dispatcher    |  | (sub renewal)    |  | (draft vars)     | |
+|  +---------------+  +------------------+  +------------------+ |
+|                                                                |
+|  +-------------------+                                         |
+|  | priority_pipeline  |                                        |
+|  | (priority RAG)     |                                        |
+|  +-------------------+                                         |
++================================================================+
+```
+
+## Queue Design Rationale
+
+### Isolation by Workload Type
+
+| Queue | Workload | Why Isolated |
+|-------|----------|-------------|
+| `dataset` | Document indexing (extract, chunk, embed, index) | CPU/memory intensive, long-running |
+| `priority_dataset` | Priority document indexing | Bypass dataset queue backlog |
+| `pipeline` | RAG pipeline execution | Full workflow + indexing |
+| `priority_pipeline` | Priority RAG pipeline | Bypass pipeline queue backlog |
+| `mail` | SMTP email sending | Network I/O, should not block compute |
+| `ops_trace` | Observability trace export | Fire-and-forget, tolerate drops |
+| `app_deletion` | App and related data cleanup | Cascading deletes, long-running |
+| `plugin` | Plugin auto-upgrade checks | External API calls |
+| `workflow_storage` | Persist workflow/node executions | DB writes after execution |
+| `conversation` | Conversation deletion/cleanup | Cascading deletes |
+| `workflow` | Async workflow execution | Full engine runs |
+| `schedule_poller` | Poll for due schedules | Periodic, lightweight |
+| `schedule_executor` | Execute scheduled workflows | Full engine runs |
+| `triggered_workflow_dispatcher` | Dispatch trigger-invoked workflows | Fan-out coordination |
+| `trigger_refresh_executor` | Refresh trigger subscriptions | External API calls |
+| `workflow_draft_var` | Draft variable persistence | DB writes |
+
+### Priority Queues
+
+Two queue pairs use priority queues for tiered processing:
+
+```
+Standard:   dataset  ---------> Worker Pool A (bulk indexing)
+Priority:   priority_dataset -> Worker Pool A (same workers, higher priority)
+
+Standard:   pipeline ----------> Worker Pool B (bulk pipeline)
+Priority:   priority_pipeline -> Worker Pool B (same workers, higher priority)
+```
+
+## Task Routing
+
+Tasks declare their queue via the `@shared_task` decorator:
+
+```python
+# api/tasks/document_indexing_task.py
+@shared_task(queue="dataset")
+def document_indexing_task(dataset_id: str, document_id: str):
+    """Index a single document."""
+    ...
+
+@shared_task(queue="priority_dataset")
+def document_indexing_task_priority(dataset_id: str, document_id: str):
+    """Priority document indexing."""
+    ...
+```
+
+### Routing Examples from the Codebase
+
+```python
+# Dataset operations
+@shared_task(queue="dataset")
+def document_indexing_task(...): ...
+def document_indexing_update_task(...): ...
+def clean_dataset_task(...): ...
+def batch_create_segment_to_index_task(...): ...
+def enable_segments_to_index_task(...): ...
+def disable_segments_from_index_task(...): ...
+def remove_document_from_index_task(...): ...
+
+# Priority dataset
+@shared_task(queue="priority_dataset")
+def document_indexing_task_priority(...): ...
+
+# Mail
+@shared_task(queue="mail")
+def mail_invite_member_task(...): ...
+def mail_reset_password_task(...): ...
+def mail_register_task(...): ...
+def mail_change_mail_task(...): ...
+
+# Workflow execution persistence
+@shared_task(queue="workflow_storage", bind=True, max_retries=3, default_retry_delay=60)
+def workflow_execution_tasks(...): ...
+def workflow_node_execution_tasks(...): ...
+
+# Trigger system
+@shared_task(queue="schedule_executor")
+def workflow_schedule_tasks(...): ...
+
+@shared_task(queue="trigger_refresh_executor")
+def trigger_subscription_refresh_tasks(...): ...
+
+# Pipeline
+@shared_task(queue="pipeline")
+def rag_pipeline_run_task(...): ...
+
+@shared_task(queue="priority_pipeline")
+def priority_rag_pipeline_run_task(...): ...
+
+# Cleanup
+@shared_task(queue="app_deletion", bind=True, max_retries=3)
+def remove_app_and_related_data_task(...): ...
+
+@shared_task(queue="conversation")
+def delete_conversation_task(...): ...
+
+# Observability
+@shared_task(queue="ops_trace")
+def ops_trace_task(...): ...
+
+# Plugins
+@shared_task(queue="plugin")
+def process_tenant_plugin_autoupgrade_check_task(...): ...
+
+# Draft variables
+@shared_task(queue="workflow_draft_var", bind=True, max_retries=3, default_retry_delay=60)
+def workflow_draft_var_tasks(...): ...
+```
+
+## Idempotency Patterns
+
+### Bind + Retry
+
+Critical tasks use `bind=True` with retry configuration:
+
+```python
+@shared_task(queue="workflow_storage", bind=True, max_retries=3, default_retry_delay=60)
+def workflow_execution_tasks(self, ...):
+    try:
+        # Persist execution state
+        ...
+    except Exception as exc:
+        raise self.retry(exc=exc)
+```
+
+### Database-Level Idempotency
+
+Many tasks check for existing records before creating:
+
+```python
+# Check if already processed
+existing = db.session.query(WorkflowRun).filter_by(id=run_id).first()
+if existing and existing.status in terminal_states:
+    return  # Already processed, skip
+```
+
+### Embedding Cache
+
+The `CacheEmbedding` class provides natural idempotency for embedding
+operations by caching results keyed by content hash:
+
+```python
+# Check cache before embedding
+embedding = db.session.query(Embedding).filter_by(
+    model_name=model_name, hash=text_hash, provider_name=provider
+).first()
+if embedding:
+    return embedding.get_embedding()  # Cache hit
+```
+
+## Worker Scaling Strategy
+
+### Queue-Based Worker Assignment
+
+Workers are started with specific queue assignments:
+
+```bash
+# Dataset workers (CPU/memory intensive)
+celery -A celery_entrypoint worker -Q dataset,priority_dataset -c 4
+
+# Mail workers (I/O bound)
+celery -A celery_entrypoint worker -Q mail -c 8
+
+# Workflow storage (DB writes)
+celery -A celery_entrypoint worker -Q workflow_storage -c 4
+
+# General workers (all queues)
+celery -A celery_entrypoint worker -Q dataset,mail,ops_trace,... -c 4
+```
+
+### Concurrency Considerations
+
+| Queue Type | Recommended Concurrency | Rationale |
+|-----------|------------------------|-----------|
+| `dataset` | Low (2-4) | Memory-intensive embedding operations |
+| `mail` | Medium (4-8) | I/O bound, network waits |
+| `workflow_storage` | Medium (4-8) | DB writes, moderate CPU |
+| `ops_trace` | Low (2-4) | Fire-and-forget, low priority |
+| `app_deletion` | Low (1-2) | Cascading deletes, DB intensive |
+| `pipeline` | Low (2-4) | Full workflow execution |
+
+## Celery Beat Scheduler
+
+Celery Beat manages periodic tasks, configured in
+`api/extensions/ext_celery.py`:
+
+```python
+beat_schedule = {}
+
+# Dataset maintenance
+if dify_config.ENABLE_CLEAN_EMBEDDING_CACHE_TASK:
+    beat_schedule["clean_embedding_cache_task"] = {
+        "task": "schedule.clean_embedding_cache_task.clean_embedding_cache_task",
+        "schedule": crontab(minute="0", hour="2", day_of_month=f"*/{day}"),
+    }
+
+if dify_config.ENABLE_CLEAN_UNUSED_DATASETS_TASK:
+    beat_schedule["clean_unused_datasets_task"] = {
+        "task": "schedule.clean_unused_datasets_task.clean_unused_datasets_task",
+        "schedule": crontab(minute="0", hour="3", day_of_month=f"*/{day}"),
+    }
+
+# Workflow schedule polling
+if dify_config.ENABLE_WORKFLOW_SCHEDULE_POLLER_TASK:
+    beat_schedule["workflow_schedule_task"] = {
+        "task": "schedule.workflow_schedule_task.poll_workflow_schedules",
+        "schedule": timedelta(minutes=dify_config.WORKFLOW_SCHEDULE_POLLER_INTERVAL),
+    }
+
+# Trigger subscription refresh
+if dify_config.ENABLE_TRIGGER_PROVIDER_REFRESH_TASK:
+    beat_schedule["trigger_provider_refresh"] = {
+        "task": "schedule.trigger_provider_refresh_task.trigger_provider_refresh",
+        "schedule": timedelta(minutes=dify_config.TRIGGER_PROVIDER_REFRESH_INTERVAL),
+    }
+
+# Workflow run log cleanup
+if dify_config.WORKFLOW_LOG_CLEANUP_ENABLED:
+    beat_schedule["clean_workflow_runlogs_precise"] = {
+        "task": "schedule.clean_workflow_runlogs_precise.clean_workflow_runlogs_precise",
+        "schedule": crontab(minute="0", hour="2"),
+    }
+
+# Plugin auto-upgrade checks
+if dify_config.ENABLE_CHECK_UPGRADABLE_PLUGIN_TASK and dify_config.MARKETPLACE_ENABLED:
+    beat_schedule["check_upgradable_plugin_task"] = {
+        "task": "schedule.check_upgradable_plugin_task.check_upgradable_plugin_task",
+        "schedule": crontab(minute="*/15"),
+    }
+```
+
+### Beat Schedule Summary
+
+| Task | Schedule | Feature Flag |
+|------|----------|-------------|
+| Clean embedding cache | 2:00 AM, every N days | `ENABLE_CLEAN_EMBEDDING_CACHE_TASK` |
+| Clean unused datasets | 3:00 AM, every N days | `ENABLE_CLEAN_UNUSED_DATASETS_TASK` |
+| Clean messages | 4:00 AM, every N days | `ENABLE_CLEAN_MESSAGES` |
+| Mail cleanup notification | 10:00 AM, Mondays | `ENABLE_MAIL_CLEAN_DOCUMENT_NOTIFY_TASK` |
+| Dataset queue monitor | Every 30 min | `ENABLE_DATASETS_QUEUE_MONITOR` |
+| TiDB serverless create | Every hour | `ENABLE_CREATE_TIDB_SERVERLESS_TASK` |
+| TiDB serverless status | Every 10 min | `ENABLE_UPDATE_TIDB_SERVERLESS_STATUS_TASK` |
+| Workflow schedule poll | Every N min | `ENABLE_WORKFLOW_SCHEDULE_POLLER_TASK` |
+| Trigger refresh | Every N min | `ENABLE_TRIGGER_PROVIDER_REFRESH_TASK` |
+| Workflow log cleanup | 2:00 AM daily | `WORKFLOW_LOG_CLEANUP_ENABLED` |
+| Workflow run cleanup | Midnight daily | `ENABLE_WORKFLOW_RUN_CLEANUP_TASK` |
+| Plugin upgrade check | Every 15 min | `ENABLE_CHECK_UPGRADABLE_PLUGIN_TASK` |
+
+## Celery Task Wrapper
+
+The Flask-Celery integration ensures tasks run within a Flask application
+context:
+
+```python
+# api/extensions/ext_celery.py
+class FlaskTask(Task):
+    def __call__(self, *args, **kwargs):
+        with app.app_context():
+            init_request_context()
+            return self.run(*args, **kwargs)
+```
+
+This guarantees that tasks have access to:
+- Database sessions (`db.session`)
+- Redis client (`redis_client`)
+- Configuration (`dify_config`)
+- Logging context
+
+## Gevent Patching
+
+The Celery entrypoint (`api/celery_entrypoint.py`) patches for gevent
+compatibility:
+
+```python
+import psycogreen.gevent as pscycogreen_gevent
+from grpc.experimental import gevent as grpc_gevent
+
+grpc_gevent.init_gevent()
+pscycogreen_gevent.patch_psycopg()
+```
+
+This enables cooperative multitasking within Celery workers, improving
+throughput for I/O-bound tasks.
+
+## Cross-References
+
+- [01-System Overview](/docs/architecture/system-overview) -- System context
+- [03-RAG Pipeline](/docs/architecture/rag-pipeline) -- Dataset indexing tasks
+- [06-Trigger System](/docs/architecture/trigger-system) -- Schedule and trigger queues
+- [08-App Modes and Runners](/docs/architecture/app-modes-and-runners) -- Async workflow execution

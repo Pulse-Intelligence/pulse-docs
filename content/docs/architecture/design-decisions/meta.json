@@ -1,0 +1,10 @@
+{
+  "title": "Design Decisions",
+  "pages": [
+    "queue-based-graph-engine",
+    "ddd-layered-architecture",
+    "plugin-daemon-separation",
+    "variable-pool-design",
+    "command-channel-pattern"
+  ]
+}

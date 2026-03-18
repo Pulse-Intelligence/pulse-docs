@@ -1,0 +1,202 @@
+---
+title: "ADR-004: Variable Pool Design"
+description: "Workflow nodes in Pulse need to exchange data. When an LLM node produces"
+---
+
+## Context
+
+Workflow nodes in Pulse need to exchange data. When an LLM node produces
+text, subsequent nodes (IF/ELSE, template transform, answer) need to
+read that text. The system needs a mechanism for:
+
+1. **Node-to-node data flow**: Nodes declare inputs as references to
+   other nodes' outputs.
+2. **System context**: Nodes need access to runtime information (user ID,
+   conversation ID, uploaded files).
+3. **Workflow-level configuration**: Secret values (API keys, endpoints)
+   defined at the workflow level must be accessible to nodes.
+4. **Conversation memory**: In chatflow apps, certain variables must
+   persist across conversation turns.
+5. **Naming safety**: Two nodes should be able to output a variable
+   called `result` without conflict.
+
+### Constraints
+
+- Data flows are defined at design time (when the user builds the
+  workflow) using selectors like `{{#node_abc.output#}}`.
+- The pool must be thread-safe because the graph engine executes nodes
+  in parallel.
+- The pool must support any value type: strings, numbers, objects, arrays,
+  files.
+
+## Decision
+
+Implement a **namespace-isolated in-memory Variable Pool** using a
+two-level dictionary keyed by `(node_id, variable_name)`:
+
+```python
+# api/core/workflow/runtime/variable_pool.py
+class VariablePool(BaseModel):
+    variable_dictionary: defaultdict[str, dict[str, Variable]]
+    #                         ^              ^
+    #                    node_id         hash(key)
+```
+
+### Namespace Design
+
+Each node ID serves as a namespace. Four reserved namespaces provide
+access to non-node data:
+
+```python
+# api/core/workflow/constants.py
+SYSTEM_VARIABLE_NODE_ID = "sys"
+ENVIRONMENT_VARIABLE_NODE_ID = "env"
+CONVERSATION_VARIABLE_NODE_ID = "conversation"
+RAG_PIPELINE_VARIABLE_NODE_ID = "rag"
+```
+
+### Selector Pattern
+
+Variables are addressed using a two-element selector:
+
+```
+Selector: ("node_id", "variable_name")
+
+Examples:
+  ("sys", "query")           --> System variable: user's query
+  ("env", "api_key")         --> Environment variable: workflow secret
+  ("conversation", "email")  --> Conversation variable: persists across turns
+  ("llm_node_001", "text")   --> Node output: LLM-generated text
+```
+
+In the workflow graph JSON, selectors appear as `{{#node_id.key#}}`:
+
+```
+{{#sys.query#}}          --> User's input query
+{{#llm_node_001.text#}}  --> Output of LLM node
+{{#env.api_key#}}        --> Workflow environment variable
+```
+
+### Typed Variables
+
+All values in the pool are wrapped in `Variable` objects (Pydantic
+models) that carry type information:
+
+```
+Variable
+  |- name: str
+  |- value: str | int | float | dict | list | File
+  |- value_type: SegmentType (string, number, object, array, file, etc.)
+```
+
+This enables type checking at design time (the UI can warn when connecting
+a number output to a string input) and safe serialization.
+
+### Initialization Sequence
+
+When a workflow run starts, the pool is populated in this order:
+
+```
+1. System variables (sys.*)      -- from runtime context
+2. Environment variables (env.*) -- from workflow definition
+3. Conversation variables        -- from conversation state (chatflow only)
+4. RAG pipeline variables        -- from pipeline configuration (RAG only)
+5. User inputs                   -- from the Start node's form fields
+```
+
+## Consequences
+
+### Positive
+
+- **No naming collisions**: Two nodes can both output `result` because
+  they live in separate namespaces (`node_A.result` vs `node_B.result`).
+
+- **Clean data contracts**: Each node declares its expected inputs as
+  explicit selectors. The workflow builder UI can validate connections
+  at design time.
+
+- **Separation of concerns**: System, environment, conversation, and
+  node variables are clearly separated. A node cannot accidentally
+  overwrite a system variable because the `sys` namespace is read-only
+  after initialization.
+
+- **Type safety**: Wrapping values in `Variable` objects with type
+  information enables validation and prevents silent type coercion
+  errors.
+
+- **Simple mental model**: The pool is a flat key-value store with
+  namespace prefixes. There is no complex graph of variable references
+  to resolve.
+
+### Negative
+
+- **Memory usage**: All variables for all completed nodes remain in
+  memory for the entire workflow run. Long workflows with many large
+  outputs (e.g., large documents) can consume significant memory.
+
+- **No streaming between nodes**: A node must fully complete and write
+  its output before the next node can read it. Streaming LLM output
+  to downstream nodes is not supported through the pool (it uses a
+  separate streaming mechanism).
+
+- **Flat structure**: The two-element selector `(node_id, key)` does
+  not support deeply nested addressing. Nodes that produce complex
+  objects must use a single key for the entire object.
+
+### Neutral
+
+- **Thread safety**: The defaultdict with string keys is thread-safe
+  for individual reads and writes in CPython (GIL protects dict
+  operations). For cross-key consistency, the graph engine's state
+  management provides ordering guarantees.
+
+## Alternatives Considered
+
+### Alternative 1: Global Dictionary (No Namespaces)
+
+Use a single flat dictionary where all variables share one namespace.
+
+- **Pros**: Simpler addressing (just `variable_name`, no `node_id` prefix)
+- **Cons**: Naming collisions between nodes, no way to distinguish which
+  node produced a value, variable names must be globally unique
+- **Rejected because**: Workflows routinely have multiple nodes that
+  output common names like `result`, `text`, `output`. Global naming
+  would force awkward name mangling.
+
+### Alternative 2: Node-to-Node Direct Wiring
+
+Each edge in the DAG carries data directly from one node to the next,
+with no central pool.
+
+- **Pros**: No shared mutable state, clear data provenance
+- **Cons**: Nodes that need data from non-adjacent predecessors must
+  have it forwarded through intermediate nodes, no central place for
+  system/environment variables
+- **Rejected because**: Real workflows frequently reference outputs
+  from distant ancestors (e.g., the Start node's query is used by
+  nodes deep in the graph). Direct wiring would require complex
+  forwarding logic.
+
+### Alternative 3: Event Sourcing
+
+Record all variable writes as an append-only event log. Reconstruct
+state by replaying events.
+
+- **Pros**: Full audit trail, supports replay and debugging, natural
+  for distributed systems
+- **Cons**: Higher read latency (must replay events to get current
+  value), more complex implementation, overkill for single-run
+  in-memory state
+- **Rejected because**: The Variable Pool is ephemeral (one workflow
+  run). Event sourcing benefits (audit trail, replay) are better
+  served by the `workflow_node_executions` table in PostgreSQL, which
+  persists node inputs and outputs for debugging.
+
+---
+
+## Cross-References
+
+- [10 Storage and Data Flow](/docs/architecture/storage-and-data-flow) -- full
+  Variable Pool documentation
+- [ADR-001: Queue-Based Graph Engine](/docs/architecture/design-decisions/queue-based-graph-engine) --
+  how the engine uses the pool during parallel execution
