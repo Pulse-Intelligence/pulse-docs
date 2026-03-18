@@ -10,7 +10,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       nav={{
         title: (
           <>
-            <Image src="/logo.svg" alt="Pulse" width={24} height={24} />
+            <Image src="/logo.svg" alt="" width={24} height={24} aria-hidden />
             <span className="font-semibold">Pulse Docs</span>
           </>
         ),
